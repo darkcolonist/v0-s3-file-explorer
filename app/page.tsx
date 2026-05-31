@@ -1,5 +1,5 @@
 'use client';
-
+// force build 2026-05-31 cris
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase-client';
 import { decryptCredentials } from '@/lib/encryption';
