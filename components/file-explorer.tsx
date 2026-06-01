@@ -44,8 +44,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   DropdownMenuSeparator,
+  DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu';
 import { MediaPlayer } from './media-player';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 interface FileExplorerProps {
   s3Manager: S3Manager;
@@ -79,6 +81,7 @@ const isImageFile = (key: string) => {
 };
 
 export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
+  const isMobile = useIsMobile();
   const rootFolder = s3Manager.config.rootFolder 
     ? (s3Manager.config.rootFolder.endsWith('/') ? s3Manager.config.rootFolder : s3Manager.config.rootFolder + '/') 
     : '';
@@ -618,6 +621,141 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
     }
   };
 
+  const renderFileItemDetails = (
+    obj: S3Object,
+    fileName: string,
+    fileExt: string,
+    options?: { signedUrl?: string }
+  ) => (
+    <div className="space-y-1 text-left max-w-[280px] pointer-events-auto">
+      <p className="font-medium text-sm leading-snug break-words">{fileName}</p>
+      {fileExt && (
+        <p className="text-[10px] font-mono uppercase text-muted-foreground">{fileExt}</p>
+      )}
+      {obj.isDirectory ? (
+        <p className="text-xs text-muted-foreground">Folder</p>
+      ) : (
+        <>
+          <p className="text-xs text-muted-foreground">{formatFileSize(obj.size)}</p>
+          <p className="text-xs text-muted-foreground">
+            Uploaded {formatDistanceToNow(new Date(obj.lastModified), { addSuffix: true })}
+          </p>
+          <p className="text-[10px] text-muted-foreground">
+            {format(new Date(obj.lastModified), "MMM d, yyyy 'at' h:mm a")}
+          </p>
+        </>
+      )}
+      <p className="text-[10px] text-muted-foreground break-all leading-tight">{obj.key}</p>
+      {!obj.isDirectory && (
+        <div className="pt-1.5 mt-1 border-t border-border/60">
+          <p className="text-[10px] font-medium text-muted-foreground mb-0.5">File URL</p>
+          {options?.signedUrl ? (
+            <a
+              href={options.signedUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline break-all leading-tight block"
+            >
+              {options.signedUrl}
+            </a>
+          ) : (
+            <span className="text-[10px] text-muted-foreground italic">Loading URL…</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  const renderGridItemActionsMenu = (
+    obj: S3Object,
+    isUploading: boolean,
+    fileName: string,
+    fileExt: string
+  ) => (
+    <DropdownMenu
+      onOpenChange={(open) => {
+        if (open && !obj.isDirectory) prefetchUrl(obj.key);
+      }}
+    >
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 p-0 cursor-pointer bg-card/90 hover:bg-card border shadow-sm touch-manipulation"
+          aria-label={`Actions for ${fileName}`}
+        >
+          <MoreVertical className="w-4 h-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        side={isMobile ? 'bottom' : 'end'}
+        className="w-64 max-w-[min(100vw-2rem,18rem)]"
+      >
+        <DropdownMenuLabel className="font-normal px-2 py-2 cursor-default">
+          {renderFileItemDetails(obj, fileName, fileExt, {
+            signedUrl: fileUrls[obj.key],
+          })}
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={() => handlePreview(obj)}
+          className="cursor-pointer"
+          disabled={isUploading}
+        >
+          <Eye className="w-4 h-4 mr-2" />
+          Preview
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => handleCopyUrl(obj.key)}
+          className="cursor-pointer"
+          disabled={isUploading}
+        >
+          <Copy className="w-4 h-4 mr-2" />
+          Copy URL
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={async () => {
+            try {
+              const url = await s3Manager.getSignedDownloadUrl(obj.key);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = obj.key.split('/').pop() || 'download';
+              a.click();
+              toast.success('Download started');
+            } catch {
+              toast.error('Failed to download');
+            }
+          }}
+          className="cursor-pointer"
+          disabled={isUploading}
+        >
+          <Download className="w-4 h-4 mr-2" />
+          Download
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => handleVisit(obj)}
+          className="cursor-pointer text-blue-500 focus:text-blue-600"
+          disabled={isUploading}
+        >
+          <ExternalLink className="w-4 h-4 mr-2" />
+          Open in New Tab
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={() => setDeleteTarget(obj)}
+          className="cursor-pointer text-red-600 focus:text-red-700"
+          disabled={isUploading}
+        >
+          <Trash2 className="w-4 h-4 mr-2" />
+          Delete
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
   const getFilteredAndSortedObjects = () => {
     let list = objects;
     if (searchQuery && !s3SearchActive) {
@@ -983,73 +1121,99 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
                     key={index}
                     className="flex items-center justify-between p-3 hover:bg-muted rounded-lg group transition duration-150"
                   >
-                    <div
-                      className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
-                      onClick={() => obj.isDirectory ? navigateToFolder(obj.key) : handleVisit(obj)}
-                    >
-                      {(() => {
-                        if (obj.isDirectory) {
-                          return (
-                            <div className="w-8 h-8 flex items-center justify-center shrink-0">
-                              <Folder className="w-5 h-5 text-blue-500" />
-                            </div>
-                          );
-                        }
-                        if (isImageFile(obj.key)) {
-                          const thumbUrl = imageUrls[obj.key];
-                          if (thumbUrl) {
+                    {(() => {
+                      const listPrimaryCell = (
+                        <div
+                          className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
+                          onClick={() =>
+                            obj.isDirectory ? navigateToFolder(obj.key) : handleVisit(obj)
+                          }
+                          onMouseEnter={() => {
+                            if (!obj.isDirectory) prefetchUrl(obj.key);
+                          }}
+                        >
+                          {(() => {
+                            if (obj.isDirectory) {
+                              return (
+                                <div className="w-8 h-8 flex items-center justify-center shrink-0">
+                                  <Folder className="w-5 h-5 text-blue-500" />
+                                </div>
+                              );
+                            }
+                            if (isImageFile(obj.key)) {
+                              const thumbUrl = imageUrls[obj.key];
+                              if (thumbUrl) {
+                                return (
+                                  <div className="w-8 h-8 rounded border border-muted bg-muted overflow-hidden shrink-0 flex items-center justify-center">
+                                    <img
+                                      src={thumbUrl}
+                                      alt={fileName}
+                                      className="w-full h-full object-cover"
+                                    />
+                                  </div>
+                                );
+                              }
+                              return (
+                                <div className="w-8 h-8 rounded border border-muted bg-muted/40 animate-pulse shrink-0 flex items-center justify-center">
+                                  <File className="w-4 h-4 text-slate-400" />
+                                </div>
+                              );
+                            }
                             return (
-                              <div className="w-8 h-8 rounded border border-muted bg-muted overflow-hidden shrink-0 flex items-center justify-center">
-                                <img 
-                                  src={thumbUrl} 
-                                  alt={obj.key.split('/').pop()} 
-                                  className="w-full h-full object-cover"
-                                />
+                              <div className="w-8 h-8 flex items-center justify-center shrink-0">
+                                <File className="w-5 h-5 text-gray-500" />
                               </div>
                             );
-                          }
-                          return (
-                            <div className="w-8 h-8 rounded border border-muted bg-muted/40 animate-pulse shrink-0 flex items-center justify-center">
-                              <File className="w-4 h-4 text-slate-400" />
+                          })()}
+                          <div className="min-w-0 flex-1 flex flex-col justify-center">
+                            <div className="flex items-center gap-2 w-full min-w-0">
+                              <p className="text-sm font-medium truncate text-card-foreground min-w-0">
+                                {fileName}
+                              </p>
+                              {fileExt && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[9px] px-1 py-0 bg-muted/40 font-mono text-muted-foreground uppercase font-semibold border-muted/80 shrink-0"
+                                >
+                                  {fileExt}
+                                </Badge>
+                              )}
                             </div>
-                          );
-                        }
-                        return (
-                          <div className="w-8 h-8 flex items-center justify-center shrink-0">
-                            <File className="w-5 h-5 text-gray-500" />
-                          </div>
-                        );
-                      })()}
-                      <div className="min-w-0 flex-1 flex flex-col justify-center">
-                        <div className="flex items-center gap-2 w-full min-w-0">
-                          <p className="text-sm font-medium truncate text-card-foreground min-w-0">{fileName}</p>
-                          {fileExt && (
-                            <Badge 
-                              variant="outline" 
-                              className="text-[9px] px-1 py-0 bg-muted/40 font-mono text-muted-foreground uppercase font-semibold border-muted/80 shrink-0"
-                            >
-                              {fileExt}
-                            </Badge>
-                          )}
-                        </div>
-                        {!obj.isDirectory && (
-                          <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5 truncate w-full">
-                            <span className="shrink-0">{formatFileSize(obj.size)}</span>
-                            <span className="text-slate-400 dark:text-slate-600 shrink-0">•</span>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span className="cursor-help hover:underline decoration-dotted decoration-muted-foreground/40 truncate">
-                                  Uploaded {formatDistanceToNow(new Date(obj.lastModified), { addSuffix: true })}
+                            {!obj.isDirectory && (
+                              <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5 truncate w-full">
+                                <span className="shrink-0">{formatFileSize(obj.size)}</span>
+                                <span className="text-slate-400 dark:text-slate-600 shrink-0">•</span>
+                                <span className="truncate">
+                                  Uploaded{' '}
+                                  {formatDistanceToNow(new Date(obj.lastModified), {
+                                    addSuffix: true,
+                                  })}
                                 </span>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                {format(new Date(obj.lastModified), "eeee, MMMM d, yyyy 'at' h:mm:ss a")}
-                              </TooltipContent>
-                            </Tooltip>
-                          </p>
-                        )}
-                      </div>
-                    </div>
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      );
+
+                      if (isMobile) {
+                        return listPrimaryCell;
+                      }
+
+                      return (
+                        <Tooltip>
+                          <TooltipTrigger asChild>{listPrimaryCell}</TooltipTrigger>
+                          <TooltipContent
+                            side="top"
+                            sideOffset={6}
+                            className="max-w-xs p-3 pointer-events-auto"
+                          >
+                            {renderFileItemDetails(obj, fileName, fileExt, {
+                              signedUrl: obj.isDirectory ? undefined : fileUrls[obj.key],
+                            })}
+                          </TooltipContent>
+                        </Tooltip>
+                      );
+                    })()}
                     {!obj.isDirectory && (
                       <>
                         {/* Desktop Actions */}
@@ -1270,88 +1434,59 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
               {paginatedObjects.map((obj, index) => {
                 const isUploading = uploadingFiles.has(obj.key);
                 const { name: fileName, ext: fileExt } = getFileNameAndExtension(obj.key, obj.isDirectory);
-                return (
-                  <div
-                    key={index}
-                    onClick={() => obj.isDirectory ? navigateToFolder(obj.key) : handleVisit(obj)}
-                    className="relative group flex flex-col items-center justify-between p-4 bg-card hover:bg-muted/40 border rounded-xl transition duration-150 cursor-pointer text-center aspect-square select-none"
-                  >
-                    {/* Top Right Action Button for Files */}
+                const gridCardClassName =
+                  'relative group flex flex-col items-center justify-between p-4 bg-card hover:bg-muted/40 border rounded-xl transition duration-150 cursor-pointer text-center aspect-square select-none';
+                const onGridCardClick = () =>
+                  obj.isDirectory ? navigateToFolder(obj.key) : handleVisit(obj);
+
+                const gridCardBody = (
+                  <>
                     {!obj.isDirectory && (
-                      <div 
-                        className="absolute top-2 right-2 md:opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity z-10"
+                      <div
+                        className="absolute top-2 right-2 z-10 flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 focus-within:opacity-100 transition-opacity"
                         onClick={(e) => e.stopPropagation()}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onMouseEnter={() => prefetchUrl(obj.key)}
                       >
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 cursor-pointer bg-card/80 hover:bg-card border shadow-sm">
-                              <MoreVertical className="w-3.5 h-3.5" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-40">
-                            <DropdownMenuItem onClick={() => handlePreview(obj)} className="cursor-pointer">
-                              <Eye className="w-4 h-4 mr-2" />
-                              Preview
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleCopyUrl(obj.key)} className="cursor-pointer">
-                              <Copy className="w-4 h-4 mr-2" />
-                              Copy URL
-                            </DropdownMenuItem>
-                            <DropdownMenuItem 
-                              onClick={async () => {
-                                try {
-                                  const url = await s3Manager.getSignedDownloadUrl(obj.key);
-                                  const a = document.createElement('a');
-                                  a.href = url;
-                                  a.download = obj.key.split('/').pop() || 'download';
-                                  a.click();
-                                  toast.success('Download started');
-                                } catch (err) {
-                                  toast.error('Failed to download');
-                                }
-                              }} 
-                              className="cursor-pointer"
-                            >
-                              <Download className="w-4 h-4 mr-2" />
-                              Download
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleVisit(obj)} className="cursor-pointer text-blue-500 focus:text-blue-600">
-                              <ExternalLink className="w-4 h-4 mr-2" />
-                              Open in New Tab
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={() => setDeleteTarget(obj)} className="cursor-pointer text-red-600 focus:text-red-700">
-                              <Trash2 className="w-4 h-4 mr-2" />
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0 cursor-pointer bg-card/90 hover:bg-card border shadow-sm touch-manipulation"
+                          aria-label={`Copy URL for ${fileName}`}
+                          title="Copy URL"
+                          disabled={isUploading}
+                          onClick={() => handleCopyUrl(obj.key)}
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                        </Button>
+                        {renderGridItemActionsMenu(obj, isUploading, fileName, fileExt)}
                       </div>
                     )}
 
-                    {/* Graphic/Icon Representation */}
-                    <div className="flex-1 flex items-center justify-center w-full min-h-0 overflow-hidden">
+                    <div className="flex-1 flex items-center justify-center w-full min-h-0 overflow-hidden relative z-[1]">
                       {(() => {
                         if (obj.isDirectory) {
-                          return <Folder className="w-1/2 h-1/2 max-w-[64px] max-h-[64px] text-blue-500" />;
+                          return (
+                            <Folder className="w-1/2 h-1/2 max-w-[64px] max-h-[64px] text-blue-500" />
+                          );
                         }
                         if (isImageFile(obj.key)) {
                           const thumbUrl = imageUrls[obj.key];
                           if (thumbUrl) {
                             return (
-                            <div className="w-full h-full rounded-lg border bg-muted overflow-hidden flex items-center justify-center shadow-sm">
-                              <img
-                                src={thumbUrl}
-                                alt={obj.key.split('/').pop()}
-                                className="w-full h-full object-cover"
-                              />
+                              <div className="w-full h-full rounded-lg border bg-muted overflow-hidden flex items-center justify-center shadow-sm">
+                                <img
+                                  src={thumbUrl}
+                                  alt={fileName}
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                            );
+                          }
+                          return (
+                            <div className="w-full h-full rounded-lg border bg-muted/40 animate-pulse flex items-center justify-center">
+                              <File className="w-8 h-8 text-slate-400" />
                             </div>
-                          );
-                        }
-                        return (
-                          <div className="w-full h-full rounded-lg border bg-muted/40 animate-pulse flex items-center justify-center">
-                            <File className="w-8 h-8 text-slate-400" />
-                          </div>
                           );
                         }
                         return (
@@ -1370,13 +1505,14 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
                       })()}
                     </div>
 
-                    {/* Metadata & Title */}
-                    <div className="w-full mt-2 shrink-0">
+                    <div className="w-full mt-2 shrink-0 relative z-[1]">
                       <div className="flex items-center justify-center gap-1 min-w-0">
-                        <p className="text-xs font-semibold truncate text-card-foreground max-w-[80%]">{fileName}</p>
+                        <p className="text-xs font-semibold truncate text-card-foreground max-w-[80%]">
+                          {fileName}
+                        </p>
                         {isImageFile(obj.key) && fileExt && (
-                          <Badge 
-                            variant="outline" 
+                          <Badge
+                            variant="outline"
                             className="text-[8px] px-0.5 py-0 bg-muted/40 font-mono text-muted-foreground uppercase font-semibold border-muted/80 scale-90 shrink-0"
                           >
                             {fileExt}
@@ -1389,7 +1525,44 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
                         </p>
                       )}
                     </div>
-                  </div>
+                  </>
+                );
+
+                if (isMobile) {
+                  return (
+                    <div
+                      key={index}
+                      onClick={onGridCardClick}
+                      className={gridCardClassName}
+                    >
+                      {gridCardBody}
+                    </div>
+                  );
+                }
+
+                return (
+                  <Tooltip key={index}>
+                    <TooltipTrigger asChild>
+                      <div
+                        onClick={onGridCardClick}
+                        className={gridCardClassName}
+                        onMouseEnter={() => {
+                          if (!obj.isDirectory) prefetchUrl(obj.key);
+                        }}
+                      >
+                        {gridCardBody}
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent
+                      side="top"
+                      sideOffset={8}
+                      className="max-w-xs p-3 text-popover-foreground pointer-events-auto"
+                    >
+                      {renderFileItemDetails(obj, fileName, fileExt, {
+                        signedUrl: fileUrls[obj.key],
+                      })}
+                    </TooltipContent>
+                  </Tooltip>
                 );
               })}
               {hasMore && (

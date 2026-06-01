@@ -36,3 +36,4 @@
 / 2026-06-01 when i delete a file it will reload the entire page, this is a problem especially if i am like at item 900 it will bring me back to initial loaded items
 / 2026-06-01 also make it possible to upload multiple files from clipboard if browser supports it
 
+/ 2026-06-01 in grid view, show a tooltip when i hover over the item, and show also more details when i click the 3-dots. make sure it works properly in mobile as well
