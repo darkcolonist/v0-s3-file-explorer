@@ -121,6 +121,11 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
   objectsRef.current = objects;
   const currentPathRef = useRef(currentPath);
   currentPathRef.current = currentPath;
+  const viewModeRef = useRef(viewMode);
+  viewModeRef.current = viewMode;
+  const s3SearchQueryRef = useRef(s3SearchQuery);
+  s3SearchQueryRef.current = s3SearchQuery;
+  const prevRootFolderRef = useRef(rootFolder);
 
   // Synchronize starting currentPath from the URL path on mount
   useEffect(() => {
@@ -197,10 +202,13 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
     };
   }, [objects, s3Manager]);
 
-  // Reset path when active storage manager or its root path changes
+  // Reset path only when the configured root prefix changes (not on token refresh)
   useEffect(() => {
-    setCurrentPath(rootFolder);
-  }, [s3Manager, rootFolder]);
+    if (prevRootFolderRef.current !== rootFolder) {
+      prevRootFolderRef.current = rootFolder;
+      setCurrentPath(rootFolder);
+    }
+  }, [rootFolder]);
 
   // Derive page size from viewport and view mode (columns × rows for grid)
   useEffect(() => {
@@ -225,7 +233,7 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
         const items = await s3Manager.listObjects(currentPath, activeSearch, !!activeSearch);
         setObjects(items);
         if (options.resetPagination) {
-          setVisibleCount(getPageSizeForView(viewMode));
+          setVisibleCount(getPageSizeForView(viewModeRef.current));
         }
       } catch (err) {
         toast.error('Failed to load files');
@@ -234,7 +242,7 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
         setLoading(false);
       }
     },
-    [s3Manager, currentPath, s3SearchQuery, viewMode, getPageSizeForView]
+    [s3Manager, currentPath, s3SearchQuery, getPageSizeForView]
   );
 
   const addUploadedObject = useCallback((file: File, key: string) => {
@@ -355,14 +363,14 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
     };
   }, []);
 
+  // Load listing when navigating folders; manual refresh and search use loadFiles directly
   useEffect(() => {
-    loadFiles(s3SearchQuery);
-    // Update breadcrumbs relative to rootFolder
+    void loadFiles(s3SearchQueryRef.current);
     const rootPartsCount = rootFolder.split('/').filter(Boolean).length;
     const parts = currentPath.split('/').filter(Boolean);
     const relativeParts = parts.slice(rootPartsCount);
     setBreadcrumbs(relativeParts);
-  }, [currentPath, loadFiles, rootFolder, s3SearchQuery]);
+  }, [currentPath, loadFiles, rootFolder]);
 
   const navigateToFolder = (folder: string) => {
     setSearchQuery('');
@@ -391,7 +399,18 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
       toast.success(`Folder "${folderName}" created`);
       setNewFolderName('');
       setShowNewFolderInput(false);
-      loadFiles();
+      setObjects((prev) => {
+        if (prev.some((o) => o.key === folderKey)) return prev;
+        return [
+          ...prev,
+          {
+            key: folderKey,
+            size: 0,
+            lastModified: new Date(),
+            isDirectory: true,
+          },
+        ];
+      });
     } catch (err) {
       toast.error('Failed to create folder');
       console.error(err);
@@ -890,6 +909,7 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
               if (!e.target.value) {
                 setS3SearchQuery('');
                 setS3SearchActive(false);
+                void loadFiles('', { resetPagination: false });
               }
             }}
             onKeyDown={(e) => {
@@ -902,6 +922,7 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
                 setSearchQuery('');
                 setS3SearchQuery('');
                 setS3SearchActive(false);
+                void loadFiles('', { resetPagination: false });
               }
             }}
             className="h-9 pr-24 text-sm"
@@ -916,6 +937,7 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
                   setSearchQuery('');
                   setS3SearchQuery('');
                   setS3SearchActive(false);
+                  void loadFiles('', { resetPagination: false });
                 }}
               >
                 Clear

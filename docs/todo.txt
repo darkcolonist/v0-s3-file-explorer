@@ -31,9 +31,8 @@
 / 2026-06-01 sometimes it is stuck at initializing after `/#` redirect to `/`. even refresh, hard refresh nothing works. but if i clear cache i will be redirected to login page and it will start working again.
 / 2026-06-01  initial load of page will try to identify how many items per row is needed based on initial viewport. from here it will fetch how many initial items will be displayed in the page filling up the screen. this will prevent a huge screen from just loading 6 items.
 / 2026-06-01 there are some times that there's a code, key or hash mismatch that is asking me to re-enter s3 configuration details even if i have already set them up before. wouldn't it be better if it just logs out then re-logs in so that the pair will be refreshed?
-
-/ also if login failure i'd rather see a more informative message rather than login failed. that doesn't expose some security problems but developer friendly at the same time.
-
+/ 2026-06-01  also if login failure i'd rather see a more informative message rather than login failed. that doesn't expose some security problems but developer friendly at the same time.
 / 2026-06-01 when i upload multiple files from drag drop, it keeps refreshing and reloading the page
 / 2026-06-01 when i delete a file it will reload the entire page, this is a problem especially if i am like at item 900 it will bring me back to initial loaded items
 / 2026-06-01 also make it possible to upload multiple files from clipboard if browser supports it
+

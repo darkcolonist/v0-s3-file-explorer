@@ -22,6 +22,29 @@ import { Settings, LogOut, Sun, Moon } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import toast from 'react-hot-toast';
 import { Logo } from '@/components/logo';
+import type { AuthChangeEvent } from '@supabase/supabase-js';
+import type { S3Config } from '@/lib/s3-client';
+
+/** Reload stored S3 credentials only on sign-in or explicit config updates—not token refresh. */
+const S3_CONFIG_AUTH_EVENTS: AuthChangeEvent[] = ['SIGNED_IN', 'USER_UPDATED'];
+
+function s3ConfigFingerprint(
+  row: { region: string; bucket: string; provider: string },
+  credentials: Pick<
+    S3Config,
+    'accessKeyId' | 'secretAccessKey' | 'endpoint' | 'rootFolder'
+  >
+): string {
+  return JSON.stringify({
+    region: row.region,
+    bucket: row.bucket,
+    provider: row.provider,
+    accessKeyId: credentials.accessKeyId,
+    secretAccessKey: credentials.secretAccessKey,
+    endpoint: credentials.endpoint ?? '',
+    rootFolder: credentials.rootFolder ?? '',
+  });
+}
 
 const isEnvIncomplete = (): boolean => {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -48,7 +71,9 @@ export default function Home() {
   const [configModalOpen, setConfigModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
+  const [explorerKey, setExplorerKey] = useState(0);
   const recoveringSessionRef = useRef(false);
+  const s3ConfigFingerprintRef = useRef<string | null>(null);
 
   const { theme, setTheme } = useTheme();
 
@@ -105,7 +130,7 @@ export default function Home() {
           return;
         }
 
-        const manager = new S3Manager({
+        const managerConfig: S3Config = {
           accessKeyId: credentials.accessKeyId,
           secretAccessKey: credentials.secretAccessKey,
           region: data.region,
@@ -113,9 +138,16 @@ export default function Home() {
           endpoint: credentials.endpoint,
           forcePathStyle: data.provider === 'digitalocean',
           rootFolder: credentials.rootFolder,
-        });
+        };
+        const fingerprint = s3ConfigFingerprint(data, credentials);
 
-        setS3Manager(manager);
+        setS3Manager((prev) => {
+          if (prev && s3ConfigFingerprintRef.current === fingerprint) {
+            return prev;
+          }
+          s3ConfigFingerprintRef.current = fingerprint;
+          return new S3Manager(managerConfig);
+        });
       } catch (err) {
         console.error('Failed to load S3 config:', err);
         setS3Manager(null);
@@ -173,10 +205,13 @@ export default function Home() {
 
         if (session?.user) {
           setUser(session.user);
-          void loadS3Config(session.user.id);
+          if (S3_CONFIG_AUTH_EVENTS.includes(event)) {
+            void loadS3Config(session.user.id);
+          }
         } else if (event === 'SIGNED_OUT') {
           setUser(null);
           setS3Manager(null);
+          s3ConfigFingerprintRef.current = null;
         }
       }
     );
@@ -197,6 +232,7 @@ export default function Home() {
       // Clear react states
       setUser(null);
       setS3Manager(null);
+      s3ConfigFingerprintRef.current = null;
 
       clearSupabaseAuthStorage();
 
@@ -208,6 +244,7 @@ export default function Home() {
   const handleConfigSaved = async () => {
     if (user) {
       await loadS3Config(user.id);
+      setExplorerKey((k) => k + 1);
       toast.success('S3 configuration loaded');
     }
   };
@@ -298,7 +335,7 @@ export default function Home() {
             </CardContent>
           </Card>
         ) : (
-          <FileExplorer s3Manager={s3Manager} user={user} />
+          <FileExplorer key={explorerKey} s3Manager={s3Manager} user={user} />
         )}
       </div>
 
