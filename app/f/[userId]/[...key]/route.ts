@@ -31,6 +31,9 @@ export async function GET(
 
     // 3. Decrypt S3 credentials
     const credentials = decryptCredentials(data.encrypted_credentials);
+    if (!credentials) {
+      return new NextResponse('Failed to decrypt credentials: encryption key mismatch', { status: 500 });
+    }
 
     // 4. Initialize S3Manager on the server
     const s3Manager = new S3Manager({

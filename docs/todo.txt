@@ -27,5 +27,7 @@
 / 2026-06-01 load recent 10 files then load more at the bottom, s3-side search feature with search bar
 / 2026-06-01 routing /somewhereelse via catch-all route, shareable link /f/{userId}/{key} wrapping long s3 paths
 
-- in the maximum width grid view it maxes at 6 items across in a row, can you make it in such a way that the icons and thumbnails expand as well
-- hide shareable link for now as i don't think it works yet, change the color to match copy url, move beside copy url button. when i hover copy url, download file, open in new tab can you also display the actual urls below maybe they will become anchor tags
+/ 2026-06-01 grid view auto-fill columns so items expand at wide widths, thumbnails fill card
+/ 2026-06-01 hide shareable link (pending route test), url anchor preview in copy/download/open-tab tooltips
+
+/ 2026-06-01 tooltips now follow dark/light mode using popover tokens

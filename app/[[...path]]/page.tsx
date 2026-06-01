@@ -96,6 +96,11 @@ export default function Home() {
       }
 
       const credentials = decryptCredentials(data.encrypted_credentials);
+      if (!credentials) {
+        console.warn('Failed to decrypt S3 config: encryption key mismatch. Please re-enter your credentials.');
+        setS3Manager(null);
+        return;
+      }
       const manager = new S3Manager({
         accessKeyId: credentials.accessKeyId,
         secretAccessKey: credentials.secretAccessKey,

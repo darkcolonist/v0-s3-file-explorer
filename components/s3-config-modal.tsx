@@ -55,6 +55,11 @@ export function S3ConfigModal({ open, onClose, onConfigSaved }: S3ConfigModalPro
           setRegion(data.region);
           
           const credentials = decryptCredentials(data.encrypted_credentials);
+          if (!credentials) {
+            // Key mismatch — credentials encrypted with a different key
+            toast.error('Could not decrypt saved credentials. Please re-enter your S3 details.');
+            return;
+          }
           setAccessKeyId(credentials.accessKeyId || '');
           setSecretAccessKey(credentials.secretAccessKey || '');
           setEndpoint(credentials.endpoint || '');

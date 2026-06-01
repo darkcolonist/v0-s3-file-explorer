@@ -107,6 +107,8 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
   const [uploads, setUploads] = useState<UploadStatus[]>([]);
   // Cached signed URLs for image thumbnails
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
+  // Cached signed URLs for URL-preview tooltips
+  const [fileUrls, setFileUrls] = useState<Record<string, string>>({});
 
   // Synchronize starting currentPath from the URL path on mount
   useEffect(() => {
@@ -478,6 +480,16 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
     } catch (err) {
       toast.error('Failed to copy shareable link');
       console.error(err);
+    }
+  };
+
+  const prefetchUrl = async (key: string) => {
+    if (fileUrls[key]) return;
+    try {
+      const url = await s3Manager.getSignedDownloadUrl(key);
+      setFileUrls((prev) => ({ ...prev, [key]: url }));
+    } catch {
+      // silently fail — tooltip just won't show a url
     }
   };
 
@@ -912,7 +924,10 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
                     {!obj.isDirectory && (
                       <>
                         {/* Desktop Actions */}
-                        <div className="hidden md:flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2 shrink-0">
+                        <div
+                          className="hidden md:flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2 shrink-0"
+                          onMouseEnter={() => prefetchUrl(obj.key)}
+                        >
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button
@@ -938,8 +953,40 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
                                 <Copy className="w-4 h-4" />
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent>Copy URL</TooltipContent>
+                            <TooltipContent side="bottom" className="max-w-xs">
+                              <p className="font-medium mb-1">Copy URL</p>
+                              {fileUrls[obj.key] ? (
+                                <a
+                                  href={fileUrls[obj.key]}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-[10px] text-blue-400 hover:text-blue-300 break-all leading-tight block"
+                                >
+                                  {fileUrls[obj.key].slice(0, 80)}…
+                                </a>
+                              ) : (
+                                <span className="text-[10px] text-muted-foreground">hover to load url</span>
+                              )}
+                            </TooltipContent>
                           </Tooltip>
+
+                          {/* Shareable Link — hidden until route is confirmed working */}
+                          <span className="hidden">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleCopyShareableUrl(obj.key)}
+                                  disabled={isUploading}
+                                >
+                                  <Share2 className="w-4 h-4" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Copy Shareable Link</TooltipContent>
+                            </Tooltip>
+                          </span>
 
                           <Tooltip>
                             <TooltipTrigger asChild>
@@ -963,7 +1010,21 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
                                 <Download className="w-4 h-4" />
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent>Download File</TooltipContent>
+                            <TooltipContent side="bottom" className="max-w-xs">
+                              <p className="font-medium mb-1">Download File</p>
+                              {fileUrls[obj.key] ? (
+                                <a
+                                  href={fileUrls[obj.key]}
+                                  download={obj.key.split('/').pop()}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-[10px] text-blue-400 hover:text-blue-300 break-all leading-tight block"
+                                >
+                                  {fileUrls[obj.key].slice(0, 80)}…
+                                </a>
+                              ) : (
+                                <span className="text-[10px] text-muted-foreground">hover to load url</span>
+                              )}
+                            </TooltipContent>
                           </Tooltip>
 
                           <Tooltip>
@@ -977,7 +1038,22 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
                                 <ExternalLink className="w-4 h-4 text-blue-500" />
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent>Open in New Tab</TooltipContent>
+                            <TooltipContent side="bottom" className="max-w-xs">
+                              <p className="font-medium mb-1">Open in New Tab</p>
+                              {fileUrls[obj.key] ? (
+                                <a
+                                  href={fileUrls[obj.key]}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-[10px] text-blue-400 hover:text-blue-300 break-all leading-tight block"
+                                >
+                                  {fileUrls[obj.key].slice(0, 80)}…
+                                </a>
+                              ) : (
+                                <span className="text-[10px] text-muted-foreground">hover to load url</span>
+                              )}
+                            </TooltipContent>
                           </Tooltip>
 
                           <Tooltip>
@@ -992,19 +1068,6 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent>Delete File</TooltipContent>
-                          </Tooltip>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => handleCopyShareableUrl(obj.key)}
-                                disabled={isUploading}
-                              >
-                                <Share2 className="w-4 h-4 text-emerald-500" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Copy Shareable Link</TooltipContent>
                           </Tooltip>
                         </div>
 
@@ -1048,11 +1111,6 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
                                 Open in New Tab
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={() => handleCopyShareableUrl(obj.key)} className="cursor-pointer text-emerald-600 focus:text-emerald-700">
-                                <Share2 className="w-4 h-4 mr-2" />
-                                Copy Shareable Link
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
                               <DropdownMenuItem onClick={() => setDeleteTarget(obj)} className="cursor-pointer text-red-600 focus:text-red-700">
                                 <Trash2 className="w-4 h-4 mr-2" />
                                 Delete
@@ -1079,7 +1137,7 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
               )}
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+          <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
               {paginatedObjects.map((obj, index) => {
                 const isUploading = uploadingFiles.has(obj.key);
                 const { name: fileName, ext: fileExt } = getFileNameAndExtension(obj.key, obj.isDirectory);
@@ -1133,11 +1191,6 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
                               Open in New Tab
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={() => handleCopyShareableUrl(obj.key)} className="cursor-pointer text-emerald-600 focus:text-emerald-700">
-                              <Share2 className="w-4 h-4 mr-2" />
-                              Copy Shareable Link
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
                             <DropdownMenuItem onClick={() => setDeleteTarget(obj)} className="cursor-pointer text-red-600 focus:text-red-700">
                               <Trash2 className="w-4 h-4 mr-2" />
                               Delete
@@ -1148,36 +1201,36 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
                     )}
 
                     {/* Graphic/Icon Representation */}
-                    <div className="flex-1 flex items-center justify-center w-full min-h-0">
+                    <div className="flex-1 flex items-center justify-center w-full min-h-0 overflow-hidden">
                       {(() => {
                         if (obj.isDirectory) {
-                          return <Folder className="w-16 h-16 text-blue-500 shrink-0" />;
+                          return <Folder className="w-1/2 h-1/2 max-w-[64px] max-h-[64px] text-blue-500" />;
                         }
                         if (isImageFile(obj.key)) {
                           const thumbUrl = imageUrls[obj.key];
                           if (thumbUrl) {
                             return (
-                              <div className="w-20 h-20 rounded-lg border bg-muted overflow-hidden flex items-center justify-center shadow-sm shrink-0">
-                                <img 
-                                  src={thumbUrl} 
-                                  alt={obj.key.split('/').pop()} 
-                                  className="w-full h-full object-cover"
-                                />
-                              </div>
-                            );
-                          }
-                          return (
-                            <div className="w-20 h-20 rounded-lg border bg-muted/40 animate-pulse flex items-center justify-center shrink-0">
-                              <File className="w-8 h-8 text-slate-400" />
+                            <div className="w-full h-full rounded-lg border bg-muted overflow-hidden flex items-center justify-center shadow-sm">
+                              <img
+                                src={thumbUrl}
+                                alt={obj.key.split('/').pop()}
+                                className="w-full h-full object-cover"
+                              />
                             </div>
                           );
                         }
                         return (
-                          <div className="w-20 h-20 rounded-lg border bg-muted/20 flex items-center justify-center relative shrink-0">
+                          <div className="w-full h-full rounded-lg border bg-muted/40 animate-pulse flex items-center justify-center">
+                            <File className="w-8 h-8 text-slate-400" />
+                          </div>
+                          );
+                        }
+                        return (
+                          <div className="w-full h-full rounded-lg border bg-muted/20 flex items-center justify-center relative">
                             <File className="w-10 h-10 text-gray-400" />
                             {fileExt && (
-                              <Badge 
-                                variant="outline" 
+                              <Badge
+                                variant="outline"
                                 className="absolute bottom-1 right-1 text-[8px] px-1 py-0 bg-background/90 font-mono text-muted-foreground uppercase font-semibold border-muted/80"
                               >
                                 {fileExt}
