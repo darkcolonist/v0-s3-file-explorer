@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { computePageSize, getViewportSize, MIN_PAGE_SIZE } from '@/lib/viewport-page-size';
 import { formatDistanceToNow, format } from 'date-fns';
 import { S3Manager, S3Object } from '@/lib/s3-client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -99,7 +100,13 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [s3SearchQuery, setS3SearchQuery] = useState('');
   const [s3SearchActive, setS3SearchActive] = useState(false);
-  const [visibleCount, setVisibleCount] = useState(10);
+  const [visibleCount, setVisibleCount] = useState(MIN_PAGE_SIZE);
+  const [pageSize, setPageSize] = useState(MIN_PAGE_SIZE);
+
+  const getPageSizeForView = useCallback(
+    (mode: 'list' | 'grid') => computePageSize(mode, getViewportSize()),
+    []
+  );
 
   // Drag and drop states
   const [isDragging, setIsDragging] = useState(false);
@@ -109,6 +116,11 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
   // Cached signed URLs for URL-preview tooltips
   const [fileUrls, setFileUrls] = useState<Record<string, string>>({});
+
+  const objectsRef = useRef(objects);
+  objectsRef.current = objects;
+  const currentPathRef = useRef(currentPath);
+  currentPathRef.current = currentPath;
 
   // Synchronize starting currentPath from the URL path on mount
   useEffect(() => {
@@ -190,7 +202,78 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
     setCurrentPath(rootFolder);
   }, [s3Manager, rootFolder]);
 
-  // Document-wide drag and drop listeners
+  // Derive page size from viewport and view mode (columns × rows for grid)
+  useEffect(() => {
+    const syncPageSize = () => {
+      const next = getPageSizeForView(viewMode);
+      setPageSize(next);
+      setVisibleCount((prev) => Math.max(prev, next));
+    };
+
+    syncPageSize();
+    window.addEventListener('resize', syncPageSize);
+    return () => window.removeEventListener('resize', syncPageSize);
+  }, [viewMode, getPageSizeForView]);
+
+  const loadFiles = useCallback(
+    async (
+      activeSearch = s3SearchQuery,
+      options: { resetPagination?: boolean } = { resetPagination: true }
+    ) => {
+      setLoading(true);
+      try {
+        const items = await s3Manager.listObjects(currentPath, activeSearch, !!activeSearch);
+        setObjects(items);
+        if (options.resetPagination) {
+          setVisibleCount(getPageSizeForView(viewMode));
+        }
+      } catch (err) {
+        toast.error('Failed to load files');
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [s3Manager, currentPath, s3SearchQuery, viewMode, getPageSizeForView]
+  );
+
+  const addUploadedObject = useCallback((file: File, key: string) => {
+    const newObj: S3Object = {
+      key,
+      size: file.size,
+      lastModified: new Date(),
+      isDirectory: false,
+    };
+    setObjects((prev) => {
+      const without = prev.filter((o) => o.key !== key);
+      return [...without, newObj];
+    });
+  }, []);
+
+  const removeObjectFromList = useCallback((key: string) => {
+    setObjects((prev) => prev.filter((o) => o.key !== key));
+    setImageUrls((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    setFileUrls((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    setSelectedFile((current) => {
+      if (current?.key === key) {
+        setPreviewUrl(null);
+        return null;
+      }
+      return current;
+    });
+  }, []);
+
+  const handleUploadRef = useRef<(files: FileList | File[] | null) => Promise<void>>(async () => {});
+
+  // Document-wide drag and drop + clipboard paste listeners
   useEffect(() => {
     const handleDragEnter = (e: DragEvent) => {
       e.preventDefault();
@@ -224,36 +307,53 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
       setIsDragging(false);
 
       if (e.dataTransfer && e.dataTransfer.files.length > 0) {
-        await handleUpload(e.dataTransfer.files);
+        await handleUploadRef.current(e.dataTransfer.files);
       }
+    };
+
+    const handlePaste = async (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      const files: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === 'file') {
+          const file = item.getAsFile();
+          if (file) files.push(file);
+        }
+      }
+
+      if (files.length === 0) return;
+
+      e.preventDefault();
+      await handleUploadRef.current(files);
     };
 
     window.addEventListener('dragenter', handleDragEnter);
     window.addEventListener('dragover', handleDragOver);
     window.addEventListener('dragleave', handleDragLeave);
     window.addEventListener('drop', handleDrop);
+    window.addEventListener('paste', handlePaste);
 
     return () => {
       window.removeEventListener('dragenter', handleDragEnter);
       window.removeEventListener('dragover', handleDragOver);
       window.removeEventListener('dragleave', handleDragLeave);
       window.removeEventListener('drop', handleDrop);
+      window.removeEventListener('paste', handlePaste);
     };
-  }, [currentPath, objects]);
-
-  const loadFiles = useCallback(async (activeSearch = s3SearchQuery) => {
-    setLoading(true);
-    try {
-      const items = await s3Manager.listObjects(currentPath, activeSearch, !!activeSearch);
-      setObjects(items);
-      setVisibleCount(10); // Reset pagination display count
-    } catch (err) {
-      toast.error('Failed to load files');
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  }, [s3Manager, currentPath, s3SearchQuery]);
+  }, []);
 
   useEffect(() => {
     loadFiles(s3SearchQuery);
@@ -300,15 +400,18 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
     }
   };
 
-  const handleUpload = async (files: FileList | null) => {
+  const handleUpload = async (files: FileList | File[] | null) => {
     if (!files || files.length === 0) return;
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const fileKey = currentPath + file.name;
+    const path = currentPathRef.current;
+    const list = Array.from(files);
 
-      // Check if file already exists
-      const fileExists = objects.some((obj) => obj.key === fileKey && !obj.isDirectory);
+    for (const file of list) {
+      const fileKey = path + file.name;
+
+      const fileExists = objectsRef.current.some(
+        (obj) => obj.key === fileKey && !obj.isDirectory
+      );
 
       if (fileExists) {
         setOverwriteTarget({ file, key: fileKey });
@@ -318,6 +421,8 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
       await uploadFile(file, fileKey);
     }
   };
+
+  handleUploadRef.current = handleUpload;
 
   const uploadFile = async (file: File, key: string) => {
     setUploadingFiles((prev) => new Set(prev).add(key));
@@ -367,7 +472,7 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
       });
 
       toast.success(`Uploaded ${file.name}`);
-      loadFiles();
+      addUploadedObject(file, key);
 
       // Automatically copy to clipboard when upload completes successfully
       try {
@@ -396,10 +501,11 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
     if (!deleteTarget) return;
 
     try {
-      await s3Manager.deleteObject(deleteTarget.key);
+      const key = deleteTarget.key;
+      await s3Manager.deleteObject(key);
       toast.success('File deleted');
       setDeleteTarget(null);
-      loadFiles();
+      removeObjectFromList(key);
     } catch (err) {
       toast.error('Failed to delete file');
       console.error(err);
@@ -527,6 +633,7 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
             </div>
             <h2 className="text-2xl font-bold text-white">Drop files to upload</h2>
             <p className="text-sm text-slate-400">Upload directly to <span className="font-mono text-blue-400 font-semibold">{currentPath || 'Root'}</span></p>
+            <p className="text-xs text-slate-500">You can also paste files from the clipboard (Ctrl+V)</p>
           </div>
         </div>
       )}
@@ -596,7 +703,7 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                onClick={() => loadFiles()}
+                onClick={() => loadFiles(s3SearchQuery, { resetPagination: false })}
                 variant="ghost"
                 size="sm"
                 disabled={loading}
@@ -663,7 +770,7 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
 
           {/* Refresh - Standard button */}
           <Button
-            onClick={() => loadFiles()}
+            onClick={() => loadFiles(s3SearchQuery, { resetPagination: false })}
             variant="ghost"
             size="sm"
             disabled={loading}
@@ -1128,7 +1235,7 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setVisibleCount((c) => c + 10)}
+                    onClick={() => setVisibleCount((c) => c + pageSize)}
                     className="cursor-pointer"
                   >
                     Load More ({sortedObjects.length - visibleCount} remaining)
@@ -1268,7 +1375,7 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setVisibleCount((c) => c + 10)}
+                    onClick={() => setVisibleCount((c) => c + pageSize)}
                     className="cursor-pointer"
                   >
                     Load More ({sortedObjects.length - visibleCount} remaining)

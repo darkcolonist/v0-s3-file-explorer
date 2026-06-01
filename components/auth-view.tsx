@@ -4,6 +4,12 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase-client';
 import { getSessionWithTimeout } from '@/lib/auth-session';
 import { clearSupabaseAuthStorage } from '@/lib/clear-supabase-auth-storage';
+import {
+  authErrorFromQueryParam,
+  formatAuthErrorToast,
+  logAuthError,
+  resolveAuthError,
+} from '@/lib/auth-error-messages';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import toast from 'react-hot-toast';
@@ -17,20 +23,39 @@ export function AuthView({ onAuthSuccess }: AuthViewProps) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const authError = params.get('auth_error');
+    if (authError) {
+      const details = authErrorFromQueryParam(authError);
+      if (details) {
+        logAuthError(details, authError);
+        toast.error(formatAuthErrorToast(details), { duration: 8000 });
+      }
+      params.delete('auth_error');
+      const query = params.toString();
+      const path = window.location.pathname;
+      window.history.replaceState(null, '', query ? `${path}?${query}` : path);
+    }
+  }, []);
+
+  useEffect(() => {
     // Check if already authenticated
     const checkAuth = async () => {
       try {
         const { data, error } = await getSessionWithTimeout();
         if (error) {
-          clearSupabaseAuthStorage();
+          const details = resolveAuthError(error, 'session_check');
+          logAuthError(details, error);
+          clearSupabaseAuthStorage({ preservePkceVerifier: true });
           return;
         }
         if (data.session) {
           onAuthSuccess();
         }
       } catch (err) {
-        console.error('Auth check failed:', err);
-        clearSupabaseAuthStorage();
+        const details = resolveAuthError(err, 'session_check');
+        logAuthError(details, err);
+        clearSupabaseAuthStorage({ preservePkceVerifier: true });
       } finally {
         setIsLoading(false);
       }
@@ -49,11 +74,14 @@ export function AuthView({ onAuthSuccess }: AuthViewProps) {
       });
 
       if (error) {
-        toast.error(`Login failed: ${error.message}`);
+        const details = resolveAuthError(error, 'oauth_start');
+        logAuthError(details, error);
+        toast.error(formatAuthErrorToast(details), { duration: 8000 });
       }
     } catch (err) {
-      toast.error('An error occurred during login');
-      console.error(err);
+      const details = resolveAuthError(err, 'oauth_start');
+      logAuthError(details, err);
+      toast.error(formatAuthErrorToast(details), { duration: 8000 });
     } finally {
       setLoading(false);
     }

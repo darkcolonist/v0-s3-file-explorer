@@ -1,9 +1,11 @@
 'use client';
 // force build 2026-05-31 cris
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase-client';
 import { getSessionWithTimeout } from '@/lib/auth-session';
 import { clearSupabaseAuthStorage } from '@/lib/clear-supabase-auth-storage';
+import { logAuthError, resolveAuthError } from '@/lib/auth-error-messages';
+import { isAuthRelatedConfigError, signOutForAuthRecovery } from '@/lib/auth-recovery';
 import { decryptCredentials } from '@/lib/encryption';
 import { S3Manager } from '@/lib/s3-client';
 import { AuthView } from '@/components/auth-view';
@@ -42,8 +44,73 @@ export default function Home() {
   const [configModalOpen, setConfigModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
+  const recoveringSessionRef = useRef(false);
 
   const { theme, setTheme } = useTheme();
+
+  const recoverFromCredentialsMismatch = useCallback(async () => {
+    if (recoveringSessionRef.current) return;
+    recoveringSessionRef.current = true;
+    setUser(null);
+    setS3Manager(null);
+    setConfigModalOpen(false);
+    try {
+      await signOutForAuthRecovery(
+        'Could not unlock your saved storage setup. Please sign in again.'
+      );
+    } finally {
+      recoveringSessionRef.current = false;
+    }
+  }, []);
+
+  const loadS3Config = useCallback(
+    async (userId: string) => {
+      try {
+        const { data, error } = await supabase
+          .from('user_s3_configs')
+          .select('*')
+          .eq('user_id', userId)
+          .single();
+
+        if (error) {
+          if (isAuthRelatedConfigError(error)) {
+            await recoverFromCredentialsMismatch();
+            return;
+          }
+          setS3Manager(null);
+          return;
+        }
+
+        if (!data) {
+          setS3Manager(null);
+          return;
+        }
+
+        const credentials = decryptCredentials(data.encrypted_credentials);
+        if (!credentials) {
+          console.warn('Failed to decrypt S3 config — signing out for session refresh.');
+          await recoverFromCredentialsMismatch();
+          return;
+        }
+
+        const manager = new S3Manager({
+          accessKeyId: credentials.accessKeyId,
+          secretAccessKey: credentials.secretAccessKey,
+          region: data.region,
+          bucket: data.bucket,
+          endpoint: credentials.endpoint,
+          forcePathStyle: data.provider === 'digitalocean',
+          rootFolder: credentials.rootFolder,
+        });
+
+        setS3Manager(manager);
+      } catch (err) {
+        console.error('Failed to load S3 config:', err);
+        setS3Manager(null);
+      }
+    },
+    [recoverFromCredentialsMismatch]
+  );
   const envIncomplete = isEnvIncomplete();
 
   useEffect(() => {
@@ -68,7 +135,8 @@ export default function Home() {
       try {
         const { data: { session }, error } = await getSessionWithTimeout();
         if (error) {
-          clearSupabaseAuthStorage();
+          logAuthError(resolveAuthError(error, 'session_init'), error);
+          clearSupabaseAuthStorage({ preservePkceVerifier: true });
           return;
         }
         if (session?.user) {
@@ -76,8 +144,8 @@ export default function Home() {
           await loadS3Config(session.user.id);
         }
       } catch (err) {
-        console.error('Auth init failed:', err);
-        clearSupabaseAuthStorage();
+        logAuthError(resolveAuthError(err, 'session_init'), err);
+        clearSupabaseAuthStorage({ preservePkceVerifier: true });
       } finally {
         finishInitialLoad();
       }
@@ -105,43 +173,7 @@ export default function Home() {
       cancelled = true;
       authListener.subscription.unsubscribe();
     };
-  }, [envIncomplete]);
-
-  const loadS3Config = async (userId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('user_s3_configs')
-        .select('*')
-        .eq('user_id', userId)
-        .single();
-
-      if (error || !data) {
-        setS3Manager(null);
-        return;
-      }
-
-      const credentials = decryptCredentials(data.encrypted_credentials);
-      if (!credentials) {
-        console.warn('Failed to decrypt S3 config: encryption key mismatch. Please re-enter your credentials.');
-        setS3Manager(null);
-        return;
-      }
-      const manager = new S3Manager({
-        accessKeyId: credentials.accessKeyId,
-        secretAccessKey: credentials.secretAccessKey,
-        region: data.region,
-        bucket: data.bucket,
-        endpoint: credentials.endpoint,
-        forcePathStyle: data.provider === 'digitalocean',
-        rootFolder: credentials.rootFolder,
-      });
-
-      setS3Manager(manager);
-    } catch (err) {
-      console.error('Failed to load S3 config:', err);
-      setS3Manager(null);
-    }
-  };
+  }, [envIncomplete, loadS3Config]);
 
   const handleLogout = async () => {
     const toastId = toast.loading('Logging you out...');

@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import toast from 'react-hot-toast';
 import { supabase } from '@/lib/supabase-client';
+import { signOutForAuthRecovery } from '@/lib/auth-recovery';
 import { encryptCredentials, decryptCredentials } from '@/lib/encryption';
 import { S3Manager } from '@/lib/s3-client';
 
@@ -56,8 +57,10 @@ export function S3ConfigModal({ open, onClose, onConfigSaved }: S3ConfigModalPro
           
           const credentials = decryptCredentials(data.encrypted_credentials);
           if (!credentials) {
-            // Key mismatch — credentials encrypted with a different key
-            toast.error('Could not decrypt saved credentials. Please re-enter your S3 details.');
+            onClose();
+            await signOutForAuthRecovery(
+              'Could not unlock your saved storage setup. Please sign in again.'
+            );
             return;
           }
           setAccessKeyId(credentials.accessKeyId || '');
