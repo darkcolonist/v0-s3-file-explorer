@@ -48,14 +48,14 @@ export class S3Manager {
     this.client = new S3Client(clientConfig);
   }
 
-  async listObjects(prefix = ''): Promise<S3Object[]> {
+  async listObjects(prefix = '', searchQuery?: string, recursive = false): Promise<S3Object[]> {
     try {
+      const searchPrefix = searchQuery ? prefix + searchQuery : prefix;
       const command = new ListObjectsV2Command({
         Bucket: this.config.bucket,
-        Prefix: prefix,
-        Delimiter: '/',
+        Prefix: searchPrefix,
+        ...(recursive ? {} : { Delimiter: '/' }),
       });
-
       const response = await this.client.send(command);
       const objects: S3Object[] = [];
 

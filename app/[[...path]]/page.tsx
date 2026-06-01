@@ -236,7 +236,7 @@ export default function Home() {
             </CardContent>
           </Card>
         ) : (
-          <FileExplorer s3Manager={s3Manager} />
+          <FileExplorer s3Manager={s3Manager} user={user} />
         )}
       </div>
 

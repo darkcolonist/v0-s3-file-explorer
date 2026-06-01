@@ -25,6 +25,7 @@ import {
   List,
   FolderPlus,
   FolderOpen,
+  Share2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
@@ -47,6 +48,7 @@ import { MediaPlayer } from './media-player';
 
 interface FileExplorerProps {
   s3Manager: S3Manager;
+  user: any;
 }
 
 interface UploadStatus {
@@ -75,7 +77,7 @@ const isImageFile = (key: string) => {
   return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext);
 };
 
-export function FileExplorer({ s3Manager }: FileExplorerProps) {
+export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
   const rootFolder = s3Manager.config.rootFolder 
     ? (s3Manager.config.rootFolder.endsWith('/') ? s3Manager.config.rootFolder : s3Manager.config.rootFolder + '/') 
     : '';
@@ -93,12 +95,57 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
   const [showNewFolderInput, setShowNewFolderInput] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
 
+  // Search & Pagination States
+  const [searchQuery, setSearchQuery] = useState('');
+  const [s3SearchQuery, setS3SearchQuery] = useState('');
+  const [s3SearchActive, setS3SearchActive] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(10);
+
   // Drag and drop states
   const [isDragging, setIsDragging] = useState(false);
   // Upload status list
   const [uploads, setUploads] = useState<UploadStatus[]>([]);
   // Cached signed URLs for image thumbnails
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
+
+  // Synchronize starting currentPath from the URL path on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const decoded = decodeURIComponent(window.location.pathname);
+      const segments = decoded.split('/').filter(Boolean);
+      
+      // If we are on the share link route `/f/...`, do not hijack routing
+      if (window.location.pathname.startsWith('/f/')) return;
+      
+      if (segments.length === 0) {
+        setCurrentPath(rootFolder);
+      } else {
+        const relativePath = segments.join('/') + '/';
+        if (rootFolder && !relativePath.startsWith(rootFolder)) {
+          setCurrentPath(rootFolder + relativePath);
+        } else {
+          setCurrentPath(relativePath);
+        }
+      }
+    }
+  }, [rootFolder]);
+
+  // Synchronize URL path with currentPath when navigating
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/f/')) {
+      let relativePath = currentPath;
+      if (rootFolder && currentPath.startsWith(rootFolder)) {
+        relativePath = currentPath.slice(rootFolder.length);
+      }
+      
+      const cleanSegments = relativePath.split('/').filter(Boolean);
+      const newPathname = cleanSegments.length > 0 ? '/' + cleanSegments.join('/') : '/';
+      
+      if (window.location.pathname !== newPathname) {
+        window.history.pushState(null, '', newPathname);
+      }
+    }
+  }, [currentPath, rootFolder]);
 
   // Load S3 signed URLs for images asynchronously to show thumbnails
   useEffect(() => {
@@ -192,29 +239,33 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
     };
   }, [currentPath, objects]);
 
-  const loadFiles = useCallback(async () => {
+  const loadFiles = useCallback(async (activeSearch = s3SearchQuery) => {
     setLoading(true);
     try {
-      const items = await s3Manager.listObjects(currentPath);
+      const items = await s3Manager.listObjects(currentPath, activeSearch, !!activeSearch);
       setObjects(items);
+      setVisibleCount(10); // Reset pagination display count
     } catch (err) {
       toast.error('Failed to load files');
       console.error(err);
     } finally {
       setLoading(false);
     }
-  }, [s3Manager, currentPath]);
+  }, [s3Manager, currentPath, s3SearchQuery]);
 
   useEffect(() => {
-    loadFiles();
+    loadFiles(s3SearchQuery);
     // Update breadcrumbs relative to rootFolder
     const rootPartsCount = rootFolder.split('/').filter(Boolean).length;
     const parts = currentPath.split('/').filter(Boolean);
     const relativeParts = parts.slice(rootPartsCount);
     setBreadcrumbs(relativeParts);
-  }, [currentPath, loadFiles, rootFolder]);
+  }, [currentPath, loadFiles, rootFolder, s3SearchQuery]);
 
   const navigateToFolder = (folder: string) => {
+    setSearchQuery('');
+    setS3SearchQuery('');
+    setS3SearchActive(false);
     setCurrentPath(folder);
   };
 
@@ -415,6 +466,44 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
     return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
   };
 
+  const handleCopyShareableUrl = async (key: string) => {
+    try {
+      if (!user) {
+        toast.error('User not authenticated');
+        return;
+      }
+      const shareUrl = `${window.location.origin}/f/${user.id}/${key}`;
+      await navigator.clipboard.writeText(shareUrl);
+      toast.success('Shareable link copied to clipboard');
+    } catch (err) {
+      toast.error('Failed to copy shareable link');
+      console.error(err);
+    }
+  };
+
+  const getFilteredAndSortedObjects = () => {
+    let list = objects;
+    if (searchQuery && !s3SearchActive) {
+      list = objects.filter((obj) => {
+        const { name } = getFileNameAndExtension(obj.key, obj.isDirectory);
+        return name.toLowerCase().includes(searchQuery.toLowerCase());
+      });
+    }
+
+    return [...list].sort((a, b) => {
+      if (a.isDirectory && !b.isDirectory) return -1;
+      if (!a.isDirectory && b.isDirectory) return 1;
+      if (a.isDirectory && b.isDirectory) {
+        return a.key.localeCompare(b.key);
+      }
+      return new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime();
+    });
+  };
+
+  const sortedObjects = getFilteredAndSortedObjects();
+  const paginatedObjects = sortedObjects.slice(0, visibleCount);
+  const hasMore = sortedObjects.length > visibleCount;
+
   return (
     <div className="space-y-4">
       {/* Drag & Drop Visual Overlay */}
@@ -495,7 +584,7 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                onClick={loadFiles}
+                onClick={() => loadFiles()}
                 variant="ghost"
                 size="sm"
                 disabled={loading}
@@ -562,7 +651,7 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
 
           {/* Refresh - Standard button */}
           <Button
-            onClick={loadFiles}
+            onClick={() => loadFiles()}
             variant="ghost"
             size="sm"
             disabled={loading}
@@ -670,6 +759,69 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
         </div>
       )}
 
+      {/* Search Bar */}
+      <div className="flex items-center gap-2 w-full">
+        <div className="relative flex-1">
+          <Input
+            id="file-search-input"
+            placeholder="Filter files by name…"
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              if (!e.target.value) {
+                setS3SearchQuery('');
+                setS3SearchActive(false);
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && searchQuery.trim()) {
+                setS3SearchQuery(searchQuery.trim());
+                setS3SearchActive(true);
+                loadFiles(searchQuery.trim());
+              }
+              if (e.key === 'Escape') {
+                setSearchQuery('');
+                setS3SearchQuery('');
+                setS3SearchActive(false);
+              }
+            }}
+            className="h-9 pr-24 text-sm"
+          />
+          <div className="absolute right-1 top-1 flex gap-1">
+            {(searchQuery || s3SearchActive) && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs text-muted-foreground cursor-pointer"
+                onClick={() => {
+                  setSearchQuery('');
+                  setS3SearchQuery('');
+                  setS3SearchActive(false);
+                }}
+              >
+                Clear
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant={s3SearchActive ? 'secondary' : 'ghost'}
+              className="h-7 px-2 text-xs cursor-pointer"
+              disabled={!searchQuery.trim()}
+              onClick={() => {
+                if (searchQuery.trim()) {
+                  setS3SearchQuery(searchQuery.trim());
+                  setS3SearchActive(true);
+                  loadFiles(searchQuery.trim());
+                }
+              }}
+              title={s3SearchActive ? 'S3 prefix search active' : 'Search S3 (press Enter)'}
+            >
+              {s3SearchActive ? 'S3 ✓' : 'S3'}
+            </Button>
+          </div>
+        </div>
+      </div>
+
       {/* File List */}
       <Card>
         <CardHeader className="pb-3">
@@ -682,7 +834,7 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
             <div className="text-center py-8 text-muted-foreground italic">No files or folders found here.</div>
           ) : viewMode === 'list' ? (
             <div className="space-y-2">
-              {objects.map((obj, index) => {
+              {paginatedObjects.map((obj, index) => {
                 const isUploading = uploadingFiles.has(obj.key);
                 const { name: fileName, ext: fileExt } = getFileNameAndExtension(obj.key, obj.isDirectory);
                 return (
@@ -841,6 +993,19 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
                             </TooltipTrigger>
                             <TooltipContent>Delete File</TooltipContent>
                           </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleCopyShareableUrl(obj.key)}
+                                disabled={isUploading}
+                              >
+                                <Share2 className="w-4 h-4 text-emerald-500" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Copy Shareable Link</TooltipContent>
+                          </Tooltip>
                         </div>
 
                         {/* Mobile Actions Dropdown */}
@@ -882,6 +1047,12 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
                                 <ExternalLink className="w-4 h-4 mr-2" />
                                 Open in New Tab
                               </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem onClick={() => handleCopyShareableUrl(obj.key)} className="cursor-pointer text-emerald-600 focus:text-emerald-700">
+                                <Share2 className="w-4 h-4 mr-2" />
+                                Copy Shareable Link
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
                               <DropdownMenuItem onClick={() => setDeleteTarget(obj)} className="cursor-pointer text-red-600 focus:text-red-700">
                                 <Trash2 className="w-4 h-4 mr-2" />
                                 Delete
@@ -894,10 +1065,22 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
                   </div>
                 );
               })}
+              {hasMore && (
+                <div className="flex justify-center pt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setVisibleCount((c) => c + 10)}
+                    className="cursor-pointer"
+                  >
+                    Load More ({sortedObjects.length - visibleCount} remaining)
+                  </Button>
+                </div>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-              {objects.map((obj, index) => {
+              {paginatedObjects.map((obj, index) => {
                 const isUploading = uploadingFiles.has(obj.key);
                 const { name: fileName, ext: fileExt } = getFileNameAndExtension(obj.key, obj.isDirectory);
                 return (
@@ -949,6 +1132,12 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
                               <ExternalLink className="w-4 h-4 mr-2" />
                               Open in New Tab
                             </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => handleCopyShareableUrl(obj.key)} className="cursor-pointer text-emerald-600 focus:text-emerald-700">
+                              <Share2 className="w-4 h-4 mr-2" />
+                              Copy Shareable Link
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
                             <DropdownMenuItem onClick={() => setDeleteTarget(obj)} className="cursor-pointer text-red-600 focus:text-red-700">
                               <Trash2 className="w-4 h-4 mr-2" />
                               Delete
@@ -1021,6 +1210,18 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
                   </div>
                 );
               })}
+              {hasMore && (
+                <div className="col-span-full flex justify-center pt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setVisibleCount((c) => c + 10)}
+                    className="cursor-pointer"
+                  >
+                    Load More ({sortedObjects.length - visibleCount} remaining)
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </CardContent>
