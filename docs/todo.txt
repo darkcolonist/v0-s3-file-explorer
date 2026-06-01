@@ -1,0 +1,6 @@
+- dragdrop anywhere on page to upload
+- show upload progress bar, also if multiple files uploaded i want list all
+- dark mode ui
+- show file extension chip, remove file extension from filename
+- add upload date
+- visit (open url in new tab) between download and delete icons

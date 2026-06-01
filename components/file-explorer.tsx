@@ -33,15 +33,26 @@ interface FileExplorerProps {
 }
 
 export function FileExplorer({ s3Manager }: FileExplorerProps) {
+  const rootFolder = s3Manager.config.rootFolder 
+    ? (s3Manager.config.rootFolder.endsWith('/') ? s3Manager.config.rootFolder : s3Manager.config.rootFolder + '/') 
+    : '';
+
   const [objects, setObjects] = useState<S3Object[]>([]);
   const [loading, setLoading] = useState(false);
-  const [currentPath, setCurrentPath] = useState('');
+  const [currentPath, setCurrentPath] = useState(rootFolder);
   const [breadcrumbs, setBreadcrumbs] = useState<string[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<S3Object | null>(null);
   const [uploadingFiles, setUploadingFiles] = useState<Set<string>>(new Set());
   const [overwriteTarget, setOverwriteTarget] = useState<{ file: File; key: string } | null>(null);
   const [selectedFile, setSelectedFile] = useState<S3Object | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [showNewFolderInput, setShowNewFolderInput] = useState(false);
+
+  // Reset path when active storage manager or its root path changes
+  useEffect(() => {
+    setCurrentPath(rootFolder);
+  }, [s3Manager, rootFolder]);
 
   const loadFiles = useCallback(async () => {
     setLoading(true);
@@ -58,19 +69,44 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
 
   useEffect(() => {
     loadFiles();
-    // Update breadcrumbs
+    // Update breadcrumbs relative to rootFolder
+    const rootPartsCount = rootFolder.split('/').filter(Boolean).length;
     const parts = currentPath.split('/').filter(Boolean);
-    setBreadcrumbs(parts);
-  }, [currentPath, loadFiles]);
+    const relativeParts = parts.slice(rootPartsCount);
+    setBreadcrumbs(relativeParts);
+  }, [currentPath, loadFiles, rootFolder]);
 
   const navigateToFolder = (folder: string) => {
     setCurrentPath(folder);
   };
 
   const handleBreadcrumbClick = (index: number) => {
+    const rootPartsCount = rootFolder.split('/').filter(Boolean).length;
     const parts = currentPath.split('/').filter(Boolean);
-    const newPath = parts.slice(0, index + 1).join('/') + (index >= 0 ? '/' : '');
+    const actualIndex = index + rootPartsCount;
+    const newPath = parts.slice(0, actualIndex + 1).join('/') + (actualIndex >= 0 ? '/' : '');
     setCurrentPath(newPath);
+  };
+
+  const handleCreateFolder = async () => {
+    if (!newFolderName.trim()) return;
+
+    const folderName = newFolderName.trim();
+    const folderKey = currentPath + folderName + '/';
+
+    setLoading(true);
+    try {
+      await s3Manager.uploadObject(folderKey, new Blob([]), 'application/x-directory');
+      toast.success(`Folder "${folderName}" created`);
+      setNewFolderName('');
+      setShowNewFolderInput(false);
+      loadFiles();
+    } catch (err) {
+      toast.error('Failed to create folder');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleUpload = async (files: FileList | null) => {
@@ -171,7 +207,7 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
       {/* Breadcrumbs */}
       <div className="flex items-center gap-2 text-sm overflow-x-auto pb-2">
         <button
-          onClick={() => setCurrentPath('')}
+          onClick={() => setCurrentPath(rootFolder)}
           className="text-blue-600 hover:underline whitespace-nowrap"
         >
           Root
@@ -190,8 +226,8 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
       </div>
 
       {/* Controls */}
-      <div className="flex gap-2 flex-wrap">
-        <div className="flex-1 min-w-[200px]">
+      <div className="flex gap-2 flex-wrap items-center">
+        <div className="flex-1 min-w-[200px] max-w-xs">
           <Input
             type="file"
             multiple
@@ -201,7 +237,7 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
           />
           <Button
             asChild
-            className="w-full"
+            className="w-full cursor-pointer"
             size="sm"
           >
             <label htmlFor="file-input" className="cursor-pointer">
@@ -210,10 +246,42 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
             </label>
           </Button>
         </div>
-        <Button onClick={loadFiles} variant="outline" size="sm" disabled={loading}>
-          <RefreshCw className="w-4 h-4" />
+
+        <Button 
+          onClick={() => setShowNewFolderInput(!showNewFolderInput)} 
+          variant="outline" 
+          size="sm"
+          className="cursor-pointer"
+        >
+          <Folder className="w-4 h-4 mr-2 text-blue-500" />
+          New Folder
+        </Button>
+
+        <Button onClick={loadFiles} variant="outline" size="sm" disabled={loading} className="cursor-pointer">
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
         </Button>
       </div>
+
+      {showNewFolderInput && (
+        <div className="flex gap-2 p-3 bg-card border rounded-lg max-w-sm animate-in fade-in slide-in-from-top-2 duration-200">
+          <Input
+            placeholder="Folder name"
+            value={newFolderName}
+            onChange={(e) => setNewFolderName(e.target.value)}
+            className="h-9 text-sm"
+            onKeyDown={(e) => e.key === 'Enter' && handleCreateFolder()}
+            autoFocus
+          />
+          <div className="flex gap-1 shrink-0">
+            <Button size="sm" variant="ghost" onClick={() => setShowNewFolderInput(false)} className="h-9 cursor-pointer">
+              Cancel
+            </Button>
+            <Button size="sm" onClick={handleCreateFolder} disabled={!newFolderName.trim()} className="h-9 cursor-pointer">
+              Create
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* File List */}
       <Card>

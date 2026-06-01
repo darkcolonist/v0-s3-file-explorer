@@ -95,6 +95,7 @@ export default function Home() {
         bucket: data.bucket,
         endpoint: credentials.endpoint,
         forcePathStyle: data.provider === 'digitalocean',
+        rootFolder: credentials.rootFolder,
       });
 
       setS3Manager(manager);

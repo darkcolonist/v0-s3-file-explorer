@@ -14,6 +14,7 @@ export interface S3Config {
   bucket: string;
   endpoint?: string; // For DigitalOcean Spaces
   forcePathStyle?: boolean;
+  rootFolder?: string; // Root prefix to scope operations
 }
 
 export interface S3Object {
@@ -25,7 +26,7 @@ export interface S3Object {
 
 export class S3Manager {
   private client: S3Client;
-  private config: S3Config;
+  public config: S3Config;
 
   constructor(config: S3Config) {
     this.config = config;
