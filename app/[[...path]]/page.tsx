@@ -2,6 +2,8 @@
 // force build 2026-05-31 cris
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase-client';
+import { getSessionWithTimeout } from '@/lib/auth-session';
+import { clearSupabaseAuthStorage } from '@/lib/clear-supabase-auth-storage';
 import { decryptCredentials } from '@/lib/encryption';
 import { S3Manager } from '@/lib/s3-client';
 import { AuthView } from '@/components/auth-view';
@@ -54,23 +56,45 @@ export default function Home() {
       return;
     }
 
-    const initAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        setUser(session.user);
-        await loadS3Config(session.user.id);
-      }
+    let cancelled = false;
+    let initialLoadFinished = false;
+    const finishInitialLoad = () => {
+      if (cancelled || initialLoadFinished) return;
+      initialLoadFinished = true;
       setLoading(false);
     };
 
-    initAuth();
-
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+    const initAuth = async () => {
+      try {
+        const { data: { session }, error } = await getSessionWithTimeout();
+        if (error) {
+          clearSupabaseAuthStorage();
+          return;
+        }
         if (session?.user) {
           setUser(session.user);
           await loadS3Config(session.user.id);
-        } else {
+        }
+      } catch (err) {
+        console.error('Auth init failed:', err);
+        clearSupabaseAuthStorage();
+      } finally {
+        finishInitialLoad();
+      }
+    };
+
+    void initAuth();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (event === 'INITIAL_SESSION' || event === 'SIGNED_OUT') {
+          finishInitialLoad();
+        }
+
+        if (session?.user) {
+          setUser(session.user);
+          void loadS3Config(session.user.id);
+        } else if (event === 'SIGNED_OUT') {
           setUser(null);
           setS3Manager(null);
         }
@@ -78,6 +102,7 @@ export default function Home() {
     );
 
     return () => {
+      cancelled = true;
       authListener.subscription.unsubscribe();
     };
   }, [envIncomplete]);
@@ -129,19 +154,7 @@ export default function Home() {
       setUser(null);
       setS3Manager(null);
 
-      // Clean up Supabase client cached values in localStorage
-      try {
-        if (typeof window !== 'undefined') {
-          for (let i = localStorage.length - 1; i >= 0; i--) {
-            const key = localStorage.key(i);
-            if (key && (key.startsWith('sb-') || key.includes('supabase'))) {
-              localStorage.removeItem(key);
-            }
-          }
-        }
-      } catch (storageErr) {
-        console.error('Error clearing local storage:', storageErr);
-      }
+      clearSupabaseAuthStorage();
 
       toast.dismiss(toastId);
       toast.success('Logged out');

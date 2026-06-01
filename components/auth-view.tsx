@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase-client';
+import { getSessionWithTimeout } from '@/lib/auth-session';
+import { clearSupabaseAuthStorage } from '@/lib/clear-supabase-auth-storage';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import toast from 'react-hot-toast';
@@ -17,13 +19,23 @@ export function AuthView({ onAuthSuccess }: AuthViewProps) {
   useEffect(() => {
     // Check if already authenticated
     const checkAuth = async () => {
-      const { data } = await supabase.auth.getSession();
-      if (data.session) {
-        onAuthSuccess();
+      try {
+        const { data, error } = await getSessionWithTimeout();
+        if (error) {
+          clearSupabaseAuthStorage();
+          return;
+        }
+        if (data.session) {
+          onAuthSuccess();
+        }
+      } catch (err) {
+        console.error('Auth check failed:', err);
+        clearSupabaseAuthStorage();
+      } finally {
+        setIsLoading(false);
       }
-      setIsLoading(false);
     };
-    checkAuth();
+    void checkAuth();
   }, [onAuthSuccess]);
 
   const handleGmailLogin = async () => {

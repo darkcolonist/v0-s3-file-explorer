@@ -31,3 +31,5 @@
 / 2026-06-01 hide shareable link (pending route test), url anchor preview in copy/download/open-tab tooltips
 
 / 2026-06-01 tooltips now follow dark/light mode using popover tokens
+
+- sometimes it is stuck at initializing after `/#` redirect to `/`. even refresh, hard refresh nothing works. but if i clear cache i will be redirected to login page and it will start working again.
