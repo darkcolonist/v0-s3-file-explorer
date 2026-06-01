@@ -6,7 +6,11 @@ import { getSessionWithTimeout } from '@/lib/auth-session';
 import { clearSupabaseAuthStorage } from '@/lib/clear-supabase-auth-storage';
 import { logAuthError, resolveAuthError } from '@/lib/auth-error-messages';
 import { isAuthRelatedConfigError, signOutForAuthRecovery } from '@/lib/auth-recovery';
-import { decryptCredentials } from '@/lib/encryption';
+import {
+  CREDENTIAL_DECRYPT_TOAST,
+  decryptCredentials,
+  isEncryptionKeyConfigured,
+} from '@/lib/encryption';
 import { S3Manager } from '@/lib/s3-client';
 import { AuthView } from '@/components/auth-view';
 import { S3ConfigModal } from '@/components/s3-config-modal';
@@ -88,8 +92,16 @@ export default function Home() {
 
         const credentials = decryptCredentials(data.encrypted_credentials);
         if (!credentials) {
-          console.warn('Failed to decrypt S3 config — signing out for session refresh.');
-          await recoverFromCredentialsMismatch();
+          setS3Manager(null);
+          setConfigModalOpen(true);
+          if (!isEncryptionKeyConfigured()) {
+            toast.error(
+              'NEXT_PUBLIC_ENCRYPTION_KEY is missing or still a placeholder in this deployment. Set it in your host env, redeploy, then re-save S3 credentials.',
+              { duration: 10000 }
+            );
+          } else {
+            toast.error(CREDENTIAL_DECRYPT_TOAST, { duration: 10000 });
+          }
           return;
         }
 
