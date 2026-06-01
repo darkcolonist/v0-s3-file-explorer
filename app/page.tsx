@@ -10,7 +10,8 @@ import { FileExplorer } from '@/components/file-explorer';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EnvWarning } from '@/components/env-warning';
-import { Settings, LogOut } from 'lucide-react';
+import { Settings, LogOut, Sun, Moon } from 'lucide-react';
+import { useTheme } from 'next-themes';
 import toast from 'react-hot-toast';
 
 const isEnvIncomplete = (): boolean => {
@@ -37,8 +38,14 @@ export default function Home() {
   const [s3Manager, setS3Manager] = useState<S3Manager | null>(null);
   const [configModalOpen, setConfigModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
 
+  const { theme, setTheme } = useTheme();
   const envIncomplete = isEnvIncomplete();
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (envIncomplete) {
@@ -144,7 +151,22 @@ export default function Home() {
             <h1 className="text-2xl font-bold">S3 File Explorer</h1>
             <p className="text-sm text-muted-foreground">{user.email}</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
+            {mounted && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                className="w-9 h-9 p-0 flex items-center justify-center cursor-pointer"
+                aria-label="Toggle Theme"
+              >
+                {theme === 'dark' ? (
+                  <Sun className="w-4 h-4 text-amber-400" />
+                ) : (
+                  <Moon className="w-4 h-4 text-slate-700" />
+                )}
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"

@@ -115,7 +115,7 @@ export class S3Manager {
       const command = new PutObjectCommand({
         Bucket: this.config.bucket,
         Key: key,
-        Body: arrayBuffer,
+        Body: new Uint8Array(arrayBuffer),
         ContentType: contentType || 'application/octet-stream',
       });
       await this.client.send(command);
@@ -137,6 +137,23 @@ export class S3Manager {
       return url;
     } catch (error) {
       console.error('Error getting signed URL:', error);
+      throw error;
+    }
+  }
+
+  async getSignedUploadUrl(key: string, contentType: string, expiresIn = 3600): Promise<string> {
+    try {
+      const command = new PutObjectCommand({
+        Bucket: this.config.bucket,
+        Key: key,
+        ContentType: contentType,
+      });
+      const url = await getSignedUrl(this.client, command, {
+        expiresIn,
+      });
+      return url;
+    } catch (error) {
+      console.error('Error getting signed upload URL:', error);
       throw error;
     }
   }

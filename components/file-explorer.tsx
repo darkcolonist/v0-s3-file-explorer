@@ -5,6 +5,8 @@ import { S3Manager, S3Object } from '@/lib/s3-client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import {
   Folder,
   File,
@@ -15,6 +17,7 @@ import {
   Download,
   RefreshCw,
   ChevronLeft,
+  ExternalLink,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
@@ -31,6 +34,32 @@ import { MediaPlayer } from './media-player';
 interface FileExplorerProps {
   s3Manager: S3Manager;
 }
+
+interface UploadStatus {
+  key: string;
+  fileName: string;
+  progress: number;
+  status: 'uploading' | 'success' | 'failed';
+  error?: string;
+}
+
+const getFileNameAndExtension = (key: string, isDirectory: boolean) => {
+  const fullName = key.split('/').pop() || '';
+  if (isDirectory) return { name: fullName, ext: '' };
+  
+  const lastDot = fullName.lastIndexOf('.');
+  if (lastDot === -1 || lastDot === 0) return { name: fullName, ext: '' };
+  
+  return {
+    name: fullName.slice(0, lastDot),
+    ext: fullName.slice(lastDot + 1).toUpperCase()
+  };
+};
+
+const isImageFile = (key: string) => {
+  const ext = key.split('.').pop()?.toLowerCase() || '';
+  return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext);
+};
 
 export function FileExplorer({ s3Manager }: FileExplorerProps) {
   const rootFolder = s3Manager.config.rootFolder 
@@ -49,10 +78,104 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
   const [newFolderName, setNewFolderName] = useState('');
   const [showNewFolderInput, setShowNewFolderInput] = useState(false);
 
+  // Drag and drop states
+  const [isDragging, setIsDragging] = useState(false);
+  // Upload status list
+  const [uploads, setUploads] = useState<UploadStatus[]>([]);
+  // Cached signed URLs for image thumbnails
+  const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
+
+  // Load S3 signed URLs for images asynchronously to show thumbnails
+  useEffect(() => {
+    const imageFiles = objects.filter((obj) => !obj.isDirectory && isImageFile(obj.key));
+    const missingKeys = imageFiles
+      .map((obj) => obj.key)
+      .filter((key) => !imageUrls[key]);
+
+    if (missingKeys.length === 0) return;
+
+    let active = true;
+
+    const loadThumbnails = async () => {
+      const fetched: Record<string, string> = {};
+      await Promise.all(
+        missingKeys.map(async (key) => {
+          try {
+            const url = await s3Manager.getSignedDownloadUrl(key, 3600);
+            fetched[key] = url;
+          } catch (err) {
+            console.error(`Failed to load thumbnail: ${key}`, err);
+          }
+        })
+      );
+
+      if (active && Object.keys(fetched).length > 0) {
+        setImageUrls((prev) => ({ ...prev, ...fetched }));
+      }
+    };
+
+    loadThumbnails();
+
+    return () => {
+      active = false;
+    };
+  }, [objects, s3Manager]);
+
   // Reset path when active storage manager or its root path changes
   useEffect(() => {
     setCurrentPath(rootFolder);
   }, [s3Manager, rootFolder]);
+
+  // Document-wide drag and drop listeners
+  useEffect(() => {
+    const handleDragEnter = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(true);
+    };
+
+    const handleDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(true);
+    };
+
+    const handleDragLeave = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (
+        e.relatedTarget === null ||
+        e.clientX <= 0 ||
+        e.clientY <= 0 ||
+        e.clientX >= window.innerWidth ||
+        e.clientY >= window.innerHeight
+      ) {
+        setIsDragging(false);
+      }
+    };
+
+    const handleDrop = async (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(false);
+
+      if (e.dataTransfer && e.dataTransfer.files.length > 0) {
+        await handleUpload(e.dataTransfer.files);
+      }
+    };
+
+    window.addEventListener('dragenter', handleDragEnter);
+    window.addEventListener('dragover', handleDragOver);
+    window.addEventListener('dragleave', handleDragLeave);
+    window.addEventListener('drop', handleDrop);
+
+    return () => {
+      window.removeEventListener('dragenter', handleDragEnter);
+      window.removeEventListener('dragover', handleDragOver);
+      window.removeEventListener('dragleave', handleDragLeave);
+      window.removeEventListener('drop', handleDrop);
+    };
+  }, [currentPath, objects]);
 
   const loadFiles = useCallback(async () => {
     setLoading(true);
@@ -130,14 +253,59 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
 
   const uploadFile = async (file: File, key: string) => {
     setUploadingFiles((prev) => new Set(prev).add(key));
+    
+    const newUpload: UploadStatus = {
+      key,
+      fileName: file.name,
+      progress: 0,
+      status: 'uploading',
+    };
+    setUploads((prev) => [newUpload, ...prev]);
+
     try {
       const contentType = file.type || 'application/octet-stream';
-      await s3Manager.uploadObject(key, file, contentType);
+      const uploadUrl = await s3Manager.getSignedUploadUrl(key, contentType);
+
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('PUT', uploadUrl, true);
+        xhr.setRequestHeader('Content-Type', contentType);
+
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const progress = Math.round((event.loaded / event.total) * 100);
+            setUploads((prev) =>
+              prev.map((up) => (up.key === key ? { ...up, progress } : up))
+            );
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status === 200) {
+            setUploads((prev) =>
+              prev.map((up) => (up.key === key ? { ...up, status: 'success', progress: 100 } : up))
+            );
+            resolve();
+          } else {
+            reject(new Error(`Upload failed with status ${xhr.status}`));
+          }
+        };
+
+        xhr.onerror = () => {
+          reject(new Error('Network error during upload'));
+        };
+
+        xhr.send(file);
+      });
+
       toast.success(`Uploaded ${file.name}`);
       loadFiles();
-    } catch (err) {
+    } catch (err: any) {
+      console.error('Upload failed:', err);
+      setUploads((prev) =>
+        prev.map((up) => (up.key === key ? { ...up, status: 'failed', error: err.message } : up))
+      );
       toast.error(`Failed to upload ${file.name}`);
-      console.error(err);
     } finally {
       setUploadingFiles((prev) => {
         const newSet = new Set(prev);
@@ -187,6 +355,16 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
     }
   };
 
+  const handleVisit = async (file: S3Object) => {
+    try {
+      const url = await s3Manager.getSignedDownloadUrl(file.key);
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      toast.error('Failed to open file');
+      console.error(err);
+    }
+  };
+
   const getFileIcon = (obj: S3Object) => {
     if (obj.isDirectory) {
       return <Folder className="w-5 h-5 text-blue-500" />;
@@ -204,6 +382,19 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
 
   return (
     <div className="space-y-4">
+      {/* Drag & Drop Visual Overlay */}
+      {isDragging && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex flex-col items-center justify-center z-50 animate-in fade-in duration-200">
+          <div className="p-8 border-2 border-dashed border-blue-500 rounded-3xl flex flex-col items-center gap-4 bg-slate-900/60 shadow-2xl scale-100 animate-in zoom-in-95 duration-200">
+            <div className="p-4 bg-blue-500/10 rounded-2xl text-blue-500 animate-bounce">
+              <Upload className="w-12 h-12" />
+            </div>
+            <h2 className="text-2xl font-bold text-white">Drop files to upload</h2>
+            <p className="text-sm text-slate-400">Upload directly to <span className="font-mono text-blue-400 font-semibold">{currentPath || 'Root'}</span></p>
+          </div>
+        </div>
+      )}
+
       {/* Breadcrumbs */}
       <div className="flex items-center gap-2 text-sm overflow-x-auto pb-2">
         <button
@@ -257,9 +448,14 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
           New Folder
         </Button>
 
-        <Button onClick={loadFiles} variant="outline" size="sm" disabled={loading} className="cursor-pointer">
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button onClick={loadFiles} variant="outline" size="sm" disabled={loading} className="cursor-pointer">
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Refresh Files</TooltipContent>
+        </Tooltip>
       </div>
 
       {showNewFolderInput && (
@@ -290,69 +486,143 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="text-center py-8 text-muted-foreground">Loading...</div>
+            <div className="text-center py-8 text-muted-foreground animate-pulse">Loading...</div>
           ) : objects.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">No files or folders</div>
+            <div className="text-center py-8 text-muted-foreground italic">No files or folders found here.</div>
           ) : (
             <div className="space-y-2">
               {objects.map((obj, index) => {
                 const isUploading = uploadingFiles.has(obj.key);
+                const { name: fileName, ext: fileExt } = getFileNameAndExtension(obj.key, obj.isDirectory);
                 return (
                   <div
                     key={index}
-                    className="flex items-center justify-between p-3 hover:bg-muted rounded-lg group"
+                    className="flex items-center justify-between p-3 hover:bg-muted rounded-lg group transition duration-150"
                   >
                     <div
                       className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
-                      onClick={() => obj.isDirectory && navigateToFolder(obj.key)}
+                      onClick={() => obj.isDirectory ? navigateToFolder(obj.key) : handleVisit(obj)}
                     >
-                      {getFileIcon(obj)}
+                      {(() => {
+                        if (obj.isDirectory) {
+                          return <Folder className="w-5 h-5 text-blue-500 shrink-0" />;
+                        }
+                        if (isImageFile(obj.key)) {
+                          const thumbUrl = imageUrls[obj.key];
+                          if (thumbUrl) {
+                            return (
+                              <div className="w-8 h-8 rounded border border-muted bg-muted overflow-hidden shrink-0 flex items-center justify-center">
+                                <img 
+                                  src={thumbUrl} 
+                                  alt={obj.key.split('/').pop()} 
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                            );
+                          }
+                          return (
+                            <div className="w-8 h-8 rounded border border-muted bg-muted/40 animate-pulse shrink-0 flex items-center justify-center">
+                              <File className="w-4 h-4 text-slate-400" />
+                            </div>
+                          );
+                        }
+                        return <File className="w-5 h-5 text-gray-500 shrink-0" />;
+                      })()}
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium truncate">{obj.key.split('/').pop()}</p>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-medium truncate text-card-foreground">{fileName}</p>
+                          {fileExt && (
+                            <Badge 
+                              variant="outline" 
+                              className="text-[9px] px-1 py-0 bg-muted/40 font-mono text-muted-foreground uppercase font-semibold border-muted/80 shrink-0"
+                            >
+                              {fileExt}
+                            </Badge>
+                          )}
+                        </div>
                         {!obj.isDirectory && (
-                          <p className="text-xs text-muted-foreground">
-                            {formatFileSize(obj.size)}
+                          <p className="text-xs text-muted-foreground flex items-center gap-2 flex-wrap mt-0.5">
+                            <span>{formatFileSize(obj.size)}</span>
+                            <span className="text-slate-400 dark:text-slate-600">•</span>
+                            <span>Uploaded {new Date(obj.lastModified).toLocaleDateString(undefined, { 
+                              year: 'numeric', 
+                              month: 'short', 
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}</span>
                           </p>
                         )}
                       </div>
                     </div>
                     {!obj.isDirectory && (
-                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handlePreview(obj)}
-                          disabled={isUploading}
-                        >
-                          <Eye className="w-4 h-4" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={async () => {
-                            try {
-                              const url = await s3Manager.getSignedDownloadUrl(obj.key);
-                              const a = document.createElement('a');
-                              a.href = url;
-                              a.download = obj.key.split('/').pop() || 'download';
-                              a.click();
-                              toast.success('Download started');
-                            } catch (err) {
-                              toast.error('Failed to download');
-                            }
-                          }}
-                          disabled={isUploading}
-                        >
-                          <Download className="w-4 h-4" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setDeleteTarget(obj)}
-                          disabled={isUploading}
-                        >
-                          <Trash2 className="w-4 h-4 text-red-500" />
-                        </Button>
+                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2 shrink-0">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handlePreview(obj)}
+                              disabled={isUploading}
+                            >
+                              <Eye className="w-4 h-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Preview File</TooltipContent>
+                        </Tooltip>
+
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={async () => {
+                                try {
+                                  const url = await s3Manager.getSignedDownloadUrl(obj.key);
+                                  const a = document.createElement('a');
+                                  a.href = url;
+                                  a.download = obj.key.split('/').pop() || 'download';
+                                  a.click();
+                                  toast.success('Download started');
+                                } catch (err) {
+                                  toast.error('Failed to download');
+                                }
+                              }}
+                              disabled={isUploading}
+                            >
+                              <Download className="w-4 h-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Download File</TooltipContent>
+                        </Tooltip>
+
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleVisit(obj)}
+                              disabled={isUploading}
+                            >
+                              <ExternalLink className="w-4 h-4 text-blue-500" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Open in New Tab</TooltipContent>
+                        </Tooltip>
+
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setDeleteTarget(obj)}
+                              disabled={isUploading}
+                            >
+                              <Trash2 className="w-4 h-4 text-red-500" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Delete File</TooltipContent>
+                        </Tooltip>
                       </div>
                     )}
                   </div>
@@ -362,6 +632,63 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
           )}
         </CardContent>
       </Card>
+
+      {/* Floating Uploads Progress Pane */}
+      {uploads.length > 0 && (
+        <Card className="fixed bottom-4 right-4 z-40 w-80 md:w-96 max-h-[350px] flex flex-col bg-slate-900/95 border-slate-800 shadow-2xl backdrop-blur-xl animate-in slide-in-from-bottom-5 duration-300">
+          <CardHeader className="bg-slate-950/40 p-3 border-b border-slate-800 flex flex-row items-center justify-between space-y-0 shrink-0">
+            <CardTitle className="text-xs font-bold flex items-center gap-2 text-white">
+              <span>Uploads ({uploads.filter(u => u.status === 'uploading').length} active)</span>
+            </CardTitle>
+            <div className="flex gap-2">
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="h-6 text-[9px] uppercase font-bold text-slate-400 hover:text-white cursor-pointer px-1.5"
+                onClick={() => setUploads((prev) => prev.filter((u) => u.status === 'uploading'))}
+              >
+                Clear Completed
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="h-6 w-6 p-0 text-slate-400 hover:text-white cursor-pointer"
+                onClick={() => setUploads([])}
+              >
+                ×
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="p-3 overflow-y-auto space-y-2.5 flex-1">
+            {uploads.map((up) => (
+              <div key={up.key} className="space-y-1 text-xs">
+                <div className="flex justify-between items-center gap-2">
+                  <span className="font-medium text-slate-200 truncate max-w-[70%]">{up.fileName}</span>
+                  <span className={`font-semibold font-mono text-[9px] uppercase ${
+                    up.status === 'success' ? 'text-emerald-400' :
+                    up.status === 'failed' ? 'text-rose-400' : 'text-blue-400'
+                  }`}>
+                    {up.status === 'success' && 'Done'}
+                    {up.status === 'failed' && 'Failed'}
+                    {up.status === 'uploading' && `${up.progress}%`}
+                  </span>
+                </div>
+                
+                <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full transition-all duration-200 ${
+                      up.status === 'success' ? 'bg-emerald-500' :
+                      up.status === 'failed' ? 'bg-rose-500' : 'bg-blue-500'
+                    }`}
+                    style={{ width: `${up.progress}%` }}
+                  />
+                </div>
+                {up.error && <p className="text-[9px] text-rose-400/80 leading-tight">{up.error}</p>}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Delete Confirmation */}
       <AlertDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>

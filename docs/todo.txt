@@ -1,6 +1,9 @@
-- dragdrop anywhere on page to upload
-- show upload progress bar, also if multiple files uploaded i want list all
-- dark mode ui
-- show file extension chip, remove file extension from filename
-- add upload date
-- visit (open url in new tab) between download and delete icons
+/ 2026-06-01 dragdrop anywhere on page to upload
+/ 2026-06-01 show upload progress bar, also if multiple files uploaded i want list all
+/ 2026-06-01 dark mode ui
+/ 2026-06-01 show file extension chip, remove file extension from filename
+/ 2026-06-01 add upload date
+/ 2026-06-01 visit (open url in new tab) between download and delete icons
+/ 2026-06-01 if file is an image, display thumbnail of the image instead of icon to the left
+/ 2026-06-01 for the right icons, please show tooltip of what it does, use external plugin tooltip instead of title attribute
+/ 2026-06-01 clicking on the filename and icon will open new tab, this is default behavior of clicking if not clicking the utility buttons
