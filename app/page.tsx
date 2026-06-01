@@ -9,8 +9,28 @@ import { S3ConfigModal } from '@/components/s3-config-modal';
 import { FileExplorer } from '@/components/file-explorer';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { EnvWarning } from '@/components/env-warning';
 import { Settings, LogOut } from 'lucide-react';
 import toast from 'react-hot-toast';
+
+const isEnvIncomplete = (): boolean => {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const encryptionKey = process.env.NEXT_PUBLIC_ENCRYPTION_KEY;
+
+  return (
+    !supabaseUrl ||
+    supabaseUrl === 'https://placeholder.supabase.co' ||
+    supabaseUrl === 'https://your-project.supabase.co' ||
+    supabaseUrl.includes('your-project') ||
+    !supabaseAnonKey ||
+    supabaseAnonKey === 'placeholder-key' ||
+    supabaseAnonKey === 'your-anon-key' ||
+    !encryptionKey ||
+    encryptionKey === 'default-key-change-in-production' ||
+    encryptionKey === 'your-secret-key'
+  );
+};
 
 export default function Home() {
   const [user, setUser] = useState<any>(null);
@@ -18,7 +38,14 @@ export default function Home() {
   const [configModalOpen, setConfigModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  const envIncomplete = isEnvIncomplete();
+
   useEffect(() => {
+    if (envIncomplete) {
+      setLoading(false);
+      return;
+    }
+
     const initAuth = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
@@ -45,7 +72,7 @@ export default function Home() {
     return () => {
       authListener.subscription.unsubscribe();
     };
-  }, []);
+  }, [envIncomplete]);
 
   const loadS3Config = async (userId: string) => {
     try {
@@ -90,6 +117,10 @@ export default function Home() {
       toast.success('S3 configuration loaded');
     }
   };
+
+  if (envIncomplete) {
+    return <EnvWarning />;
+  }
 
   if (loading) {
     return (
@@ -164,3 +195,4 @@ export default function Home() {
     </main>
   );
 }
+
