@@ -7,3 +7,16 @@
 / 2026-06-01 if file is an image, display thumbnail of the image instead of icon to the left
 / 2026-06-01 for the right icons, please show tooltip of what it does, use external plugin tooltip instead of title attribute
 / 2026-06-01 clicking on the filename and icon will open new tab, this is default behavior of clicking if not clicking the utility buttons
+/ 2026-06-01 please make a dropbox-like svg icon for this app, one for top-left icon corner and one favicon they should be same design
+/ 2026-06-01 lower right toast doesn't follow light or dark mode
+/ 2026-06-01 for the lower right progressbar if complete add copy url button, it should automatically copy the url to the clipboard
+/ 2026-06-01 add copy url button to the right side per item
+/ 2026-06-01 for the dates below filename show human readable hours eg, minutes or hours ago, use date-fns. when hover, it will show full human readable date including the day today
+/ 2026-06-01 the layout should not just be center, maximize the width of the page, don't leave so much empty space on the sides, ensure responsive design on mobile
+/ 2026-06-01 the colors of the buttons to the right, open new tab should only be the different color as it is default, move it close to delete, ensure that delete has confirmation, copy is between view and download buttons
+/ 2026-06-01 why not possible to preview images (png etc) when i click png, preview not available
+/ 2026-06-01 mobile view looks messed up, fix it
+/ 2026-06-01 left side icons and image previews aren't same size (width and height) and because of this the filename is following different alignments
+
+/ 2026-06-01 the upload file button is too bright, not following darkmode or lightmode
+/ 2026-06-01 topbar not looking well on mobile mode

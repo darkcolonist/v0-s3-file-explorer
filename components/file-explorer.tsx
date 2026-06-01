@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { formatDistanceToNow, format } from 'date-fns';
 import { S3Manager, S3Object } from '@/lib/s3-client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -18,6 +19,8 @@ import {
   RefreshCw,
   ChevronLeft,
   ExternalLink,
+  Copy,
+  MoreVertical,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
@@ -29,6 +32,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { MediaPlayer } from './media-player';
 
 interface FileExplorerProps {
@@ -300,6 +309,15 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
 
       toast.success(`Uploaded ${file.name}`);
       loadFiles();
+
+      // Automatically copy to clipboard when upload completes successfully
+      try {
+        const downloadUrl = await s3Manager.getSignedDownloadUrl(key);
+        await navigator.clipboard.writeText(downloadUrl);
+        toast.success(`URL for ${file.name} copied to clipboard`);
+      } catch (copyErr) {
+        console.error('Failed to auto-copy URL:', copyErr);
+      }
     } catch (err: any) {
       console.error('Upload failed:', err);
       setUploads((prev) =>
@@ -365,6 +383,17 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
     }
   };
 
+  const handleCopyUrl = async (key: string) => {
+    try {
+      const url = await s3Manager.getSignedDownloadUrl(key);
+      await navigator.clipboard.writeText(url);
+      toast.success('URL copied to clipboard');
+    } catch (err) {
+      toast.error('Failed to copy URL');
+      console.error(err);
+    }
+  };
+
   const getFileIcon = (obj: S3Object) => {
     if (obj.isDirectory) {
       return <Folder className="w-5 h-5 text-blue-500" />;
@@ -417,8 +446,8 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
       </div>
 
       {/* Controls */}
-      <div className="flex gap-2 flex-wrap items-center">
-        <div className="flex-1 min-w-[200px] max-w-xs">
+      <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+        <div className="w-full sm:w-auto sm:max-w-xs">
           <Input
             type="file"
             multiple
@@ -428,6 +457,7 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
           />
           <Button
             asChild
+            variant="outline"
             className="w-full cursor-pointer"
             size="sm"
           >
@@ -438,28 +468,30 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
           </Button>
         </div>
 
-        <Button 
-          onClick={() => setShowNewFolderInput(!showNewFolderInput)} 
-          variant="outline" 
-          size="sm"
-          className="cursor-pointer"
-        >
-          <Folder className="w-4 h-4 mr-2 text-blue-500" />
-          New Folder
-        </Button>
+        <div className="flex gap-2 w-full sm:w-auto">
+          <Button 
+            onClick={() => setShowNewFolderInput(!showNewFolderInput)} 
+            variant="outline" 
+            size="sm"
+            className="flex-1 sm:flex-initial cursor-pointer"
+          >
+            <Folder className="w-4 h-4 mr-2 text-blue-500" />
+            New Folder
+          </Button>
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button onClick={loadFiles} variant="outline" size="sm" disabled={loading} className="cursor-pointer">
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Refresh Files</TooltipContent>
-        </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button onClick={loadFiles} variant="outline" size="sm" disabled={loading} className="cursor-pointer">
+                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Refresh Files</TooltipContent>
+          </Tooltip>
+        </div>
       </div>
 
       {showNewFolderInput && (
-        <div className="flex gap-2 p-3 bg-card border rounded-lg max-w-sm animate-in fade-in slide-in-from-top-2 duration-200">
+        <div className="flex gap-2 p-3 bg-card border rounded-lg w-full sm:max-w-sm animate-in fade-in slide-in-from-top-2 duration-200">
           <Input
             placeholder="Folder name"
             value={newFolderName}
@@ -505,7 +537,11 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
                     >
                       {(() => {
                         if (obj.isDirectory) {
-                          return <Folder className="w-5 h-5 text-blue-500 shrink-0" />;
+                          return (
+                            <div className="w-8 h-8 flex items-center justify-center shrink-0">
+                              <Folder className="w-5 h-5 text-blue-500" />
+                            </div>
+                          );
                         }
                         if (isImageFile(obj.key)) {
                           const thumbUrl = imageUrls[obj.key];
@@ -526,7 +562,11 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
                             </div>
                           );
                         }
-                        return <File className="w-5 h-5 text-gray-500 shrink-0" />;
+                        return (
+                          <div className="w-8 h-8 flex items-center justify-center shrink-0">
+                            <File className="w-5 h-5 text-gray-500" />
+                          </div>
+                        );
                       })()}
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -544,86 +584,153 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
                           <p className="text-xs text-muted-foreground flex items-center gap-2 flex-wrap mt-0.5">
                             <span>{formatFileSize(obj.size)}</span>
                             <span className="text-slate-400 dark:text-slate-600">•</span>
-                            <span>Uploaded {new Date(obj.lastModified).toLocaleDateString(undefined, { 
-                              year: 'numeric', 
-                              month: 'short', 
-                              day: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit'
-                            })}</span>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="cursor-help hover:underline decoration-dotted decoration-muted-foreground/40">
+                                  Uploaded {formatDistanceToNow(new Date(obj.lastModified), { addSuffix: true })}
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                {format(new Date(obj.lastModified), "eeee, MMMM d, yyyy 'at' h:mm:ss a")}
+                              </TooltipContent>
+                            </Tooltip>
                           </p>
                         )}
                       </div>
                     </div>
                     {!obj.isDirectory && (
-                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2 shrink-0">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handlePreview(obj)}
-                              disabled={isUploading}
-                            >
-                              <Eye className="w-4 h-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Preview File</TooltipContent>
-                        </Tooltip>
+                      <>
+                        {/* Desktop Actions */}
+                        <div className="hidden md:flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2 shrink-0">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handlePreview(obj)}
+                                disabled={isUploading}
+                              >
+                                <Eye className="w-4 h-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Preview File</TooltipContent>
+                          </Tooltip>
 
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={async () => {
-                                try {
-                                  const url = await s3Manager.getSignedDownloadUrl(obj.key);
-                                  const a = document.createElement('a');
-                                  a.href = url;
-                                  a.download = obj.key.split('/').pop() || 'download';
-                                  a.click();
-                                  toast.success('Download started');
-                                } catch (err) {
-                                  toast.error('Failed to download');
-                                }
-                              }}
-                              disabled={isUploading}
-                            >
-                              <Download className="w-4 h-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Download File</TooltipContent>
-                        </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleCopyUrl(obj.key)}
+                                disabled={isUploading}
+                              >
+                                <Copy className="w-4 h-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Copy URL</TooltipContent>
+                          </Tooltip>
 
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleVisit(obj)}
-                              disabled={isUploading}
-                            >
-                              <ExternalLink className="w-4 h-4 text-blue-500" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Open in New Tab</TooltipContent>
-                        </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={async () => {
+                                  try {
+                                    const url = await s3Manager.getSignedDownloadUrl(obj.key);
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = obj.key.split('/').pop() || 'download';
+                                    a.click();
+                                    toast.success('Download started');
+                                  } catch (err) {
+                                    toast.error('Failed to download');
+                                  }
+                                }}
+                                disabled={isUploading}
+                              >
+                                <Download className="w-4 h-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Download File</TooltipContent>
+                          </Tooltip>
 
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => setDeleteTarget(obj)}
-                              disabled={isUploading}
-                            >
-                              <Trash2 className="w-4 h-4 text-red-500" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Delete File</TooltipContent>
-                        </Tooltip>
-                      </div>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleVisit(obj)}
+                                disabled={isUploading}
+                              >
+                                <ExternalLink className="w-4 h-4 text-blue-500" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Open in New Tab</TooltipContent>
+                          </Tooltip>
+
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setDeleteTarget(obj)}
+                                disabled={isUploading}
+                              >
+                                <Trash2 className="w-4 h-4 text-red-500" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Delete File</TooltipContent>
+                          </Tooltip>
+                        </div>
+
+                        {/* Mobile Actions Dropdown */}
+                        <div className="flex md:hidden ml-2 shrink-0">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 cursor-pointer">
+                                <MoreVertical className="w-4 h-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-40">
+                              <DropdownMenuItem onClick={() => handlePreview(obj)} className="cursor-pointer">
+                                <Eye className="w-4 h-4 mr-2" />
+                                Preview
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleCopyUrl(obj.key)} className="cursor-pointer">
+                                <Copy className="w-4 h-4 mr-2" />
+                                Copy URL
+                              </DropdownMenuItem>
+                              <DropdownMenuItem 
+                                onClick={async () => {
+                                  try {
+                                    const url = await s3Manager.getSignedDownloadUrl(obj.key);
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = obj.key.split('/').pop() || 'download';
+                                    a.click();
+                                    toast.success('Download started');
+                                  } catch (err) {
+                                    toast.error('Failed to download');
+                                  }
+                                }} 
+                                className="cursor-pointer"
+                              >
+                                <Download className="w-4 h-4 mr-2" />
+                                Download
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleVisit(obj)} className="cursor-pointer text-blue-500 focus:text-blue-600">
+                                <ExternalLink className="w-4 h-4 mr-2" />
+                                Open in New Tab
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => setDeleteTarget(obj)} className="cursor-pointer text-red-600 focus:text-red-700">
+                                <Trash2 className="w-4 h-4 mr-2" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </>
                     )}
                   </div>
                 );
@@ -635,7 +742,7 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
 
       {/* Floating Uploads Progress Pane */}
       {uploads.length > 0 && (
-        <Card className="fixed bottom-4 right-4 z-40 w-80 md:w-96 max-h-[350px] flex flex-col bg-slate-900/95 border-slate-800 shadow-2xl backdrop-blur-xl animate-in slide-in-from-bottom-5 duration-300">
+        <Card className="fixed bottom-4 right-4 left-4 sm:left-auto sm:w-96 z-40 max-h-[350px] flex flex-col bg-slate-900/95 border-slate-800 shadow-2xl backdrop-blur-xl animate-in slide-in-from-bottom-5 duration-300">
           <CardHeader className="bg-slate-950/40 p-3 border-b border-slate-800 flex flex-row items-center justify-between space-y-0 shrink-0">
             <CardTitle className="text-xs font-bold flex items-center gap-2 text-white">
               <span>Uploads ({uploads.filter(u => u.status === 'uploading').length} active)</span>
@@ -663,15 +770,26 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
             {uploads.map((up) => (
               <div key={up.key} className="space-y-1 text-xs">
                 <div className="flex justify-between items-center gap-2">
-                  <span className="font-medium text-slate-200 truncate max-w-[70%]">{up.fileName}</span>
-                  <span className={`font-semibold font-mono text-[9px] uppercase ${
-                    up.status === 'success' ? 'text-emerald-400' :
-                    up.status === 'failed' ? 'text-rose-400' : 'text-blue-400'
-                  }`}>
-                    {up.status === 'success' && 'Done'}
-                    {up.status === 'failed' && 'Failed'}
-                    {up.status === 'uploading' && `${up.progress}%`}
-                  </span>
+                  <span className="font-medium text-slate-200 truncate max-w-[65%]">{up.fileName}</span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {up.status === 'success' && (
+                      <button
+                        onClick={() => handleCopyUrl(up.key)}
+                        className="p-0.5 hover:bg-slate-800 rounded text-slate-400 hover:text-emerald-400 transition cursor-pointer"
+                        title="Copy URL"
+                      >
+                        <Copy className="w-3 h-3" />
+                      </button>
+                    )}
+                    <span className={`font-semibold font-mono text-[9px] uppercase ${
+                      up.status === 'success' ? 'text-emerald-400' :
+                      up.status === 'failed' ? 'text-rose-400' : 'text-blue-400'
+                    }`}>
+                      {up.status === 'success' && 'Done'}
+                      {up.status === 'failed' && 'Failed'}
+                      {up.status === 'uploading' && `${up.progress}%`}
+                    </span>
+                  </div>
                 </div>
                 
                 <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden">

@@ -20,10 +20,12 @@ export function MediaPlayer({ fileUrl, fileName, fileType, onClose, onDownload }
   const [duration, setDuration] = useState(0);
   const mediaRef = useRef<HTMLAudioElement | HTMLVideoElement>(null);
 
-  const isAudio = fileType.startsWith('audio/');
-  const isVideo = fileType.startsWith('video/');
-  const isImage = fileType.startsWith('image/');
-  const isPDF = fileType === 'application/pdf';
+  const ext = fileType.toLowerCase();
+
+  const isAudio = ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac'].includes(ext) || fileType.startsWith('audio/');
+  const isVideo = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].includes(ext) || fileType.startsWith('video/');
+  const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext) || fileType.startsWith('image/');
+  const isPDF = ext === 'pdf' || fileType === 'application/pdf';
 
   useEffect(() => {
     const media = mediaRef.current;
