@@ -21,6 +21,10 @@ import {
   ExternalLink,
   Copy,
   MoreVertical,
+  LayoutGrid,
+  List,
+  FolderPlus,
+  FolderOpen,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
@@ -37,6 +41,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import { MediaPlayer } from './media-player';
 
@@ -86,6 +91,7 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState('');
   const [showNewFolderInput, setShowNewFolderInput] = useState(false);
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
 
   // Drag and drop states
   const [isDragging, setIsDragging] = useState(false);
@@ -424,69 +430,222 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
         </div>
       )}
 
-      {/* Breadcrumbs */}
-      <div className="flex items-center gap-2 text-sm overflow-x-auto pb-2">
-        <button
-          onClick={() => setCurrentPath(rootFolder)}
-          className="text-blue-600 hover:underline whitespace-nowrap"
-        >
-          Root
-        </button>
-        {breadcrumbs.map((crumb, index) => (
-          <div key={index} className="flex items-center gap-2 whitespace-nowrap">
-            <ChevronRight className="w-4 h-4 text-gray-400" />
-            <button
-              onClick={() => handleBreadcrumbClick(index)}
-              className="text-blue-600 hover:underline"
-            >
-              {crumb}
-            </button>
-          </div>
-        ))}
-      </div>
-
       {/* Controls */}
-      <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
-        <div className="w-full sm:w-auto sm:max-w-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        {/* Desktop Controls (hidden on mobile) */}
+        <div className="hidden sm:flex items-center border rounded-lg overflow-hidden bg-card shadow-sm flex-wrap w-full">
+          {/* Upload Files - Far Left, Blue, with label */}
           <Input
             type="file"
             multiple
             onChange={(e) => handleUpload(e.target.files)}
             className="hidden"
-            id="file-input"
+            id="file-input-desktop"
           />
           <Button
             asChild
-            variant="outline"
-            className="w-full cursor-pointer"
+            variant="default"
+            className="rounded-none border-r border-border bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 h-9 shadow-none cursor-pointer shrink-0"
             size="sm"
           >
-            <label htmlFor="file-input" className="cursor-pointer">
+            <label htmlFor="file-input-desktop" className="cursor-pointer flex items-center">
               <Upload className="w-4 h-4 mr-2" />
               Upload Files
             </label>
           </Button>
-        </div>
 
-        <div className="flex gap-2 w-full sm:w-auto">
-          <Button 
-            onClick={() => setShowNewFolderInput(!showNewFolderInput)} 
-            variant="outline" 
-            size="sm"
-            className="flex-1 sm:flex-initial cursor-pointer"
-          >
-            <Folder className="w-4 h-4 mr-2 text-blue-500" />
-            New Folder
-          </Button>
+          {/* Current Path / Breadcrumbs */}
+          <div className="flex items-center gap-2 px-3 py-1 border-r border-border text-sm overflow-x-auto min-w-[120px] max-w-[250px] sm:max-w-md md:max-w-xl shrink-0 select-none h-9">
+            <FolderOpen className="w-4 h-4 text-blue-500 shrink-0" />
+            <button
+              onClick={() => setCurrentPath(rootFolder)}
+              className="text-blue-600 hover:underline whitespace-nowrap font-medium text-xs"
+            >
+              Root
+            </button>
+            {breadcrumbs.map((crumb, index) => (
+              <div key={index} className="flex items-center gap-1.5 whitespace-nowrap text-xs">
+                <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                <button
+                  onClick={() => handleBreadcrumbClick(index)}
+                  className="text-blue-600 hover:underline"
+                >
+                  {crumb}
+                </button>
+              </div>
+            ))}
+          </div>
 
+          {/* New Folder - Icon only */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button onClick={loadFiles} variant="outline" size="sm" disabled={loading} className="cursor-pointer">
+              <Button
+                variant={showNewFolderInput ? 'secondary' : 'ghost'}
+                size="sm"
+                onClick={() => setShowNewFolderInput(!showNewFolderInput)}
+                className="h-9 w-9 p-0 rounded-none border-r border-border cursor-pointer shrink-0"
+              >
+                <FolderPlus className="w-4 h-4 text-blue-500" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>New Folder</TooltipContent>
+          </Tooltip>
+
+          {/* Refresh - Icon only */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                onClick={loadFiles}
+                variant="ghost"
+                size="sm"
+                disabled={loading}
+                className="h-9 w-9 p-0 rounded-none border-r border-border cursor-pointer shrink-0"
+              >
                 <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
               </Button>
             </TooltipTrigger>
             <TooltipContent>Refresh Files</TooltipContent>
           </Tooltip>
+
+          {/* List View - Icon only */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant={viewMode === 'list' ? 'secondary' : 'ghost'}
+                size="sm"
+                onClick={() => setViewMode('list')}
+                className="h-9 w-9 p-0 rounded-none border-r border-border cursor-pointer shrink-0"
+              >
+                <List className="w-4 h-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>List View</TooltipContent>
+          </Tooltip>
+
+          {/* Grid View - Icon only */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant={viewMode === 'grid' ? 'secondary' : 'ghost'}
+                size="sm"
+                onClick={() => setViewMode('grid')}
+                className="h-9 w-9 p-0 rounded-none cursor-pointer shrink-0"
+              >
+                <LayoutGrid className="w-4 h-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Grid View</TooltipContent>
+          </Tooltip>
+        </div>
+
+        {/* Mobile Controls (hidden on desktop) */}
+        <div className="flex sm:hidden items-center border rounded-lg overflow-hidden bg-card shadow-sm w-full">
+          {/* Upload Files - Left side */}
+          <Input
+            type="file"
+            multiple
+            onChange={(e) => handleUpload(e.target.files)}
+            className="hidden"
+            id="file-input-mobile"
+          />
+          <Button
+            asChild
+            variant="default"
+            className="rounded-none border-r border-border bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 h-9 shadow-none cursor-pointer flex-1 justify-center"
+            size="sm"
+          >
+            <label htmlFor="file-input-mobile" className="cursor-pointer flex items-center justify-center">
+              <Upload className="w-4 h-4 mr-2" />
+              Upload Files
+            </label>
+          </Button>
+
+          {/* Refresh - Standard button */}
+          <Button
+            onClick={loadFiles}
+            variant="ghost"
+            size="sm"
+            disabled={loading}
+            className="h-9 w-9 p-0 rounded-none border-r border-border cursor-pointer shrink-0"
+            title="Refresh Files"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          </Button>
+
+          {/* More options - Dropdown menu (hamburger / 3-button style) */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-9 w-9 p-0 rounded-none cursor-pointer shrink-0"
+                title="More Actions"
+              >
+                <MoreVertical className="w-4 h-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64 max-w-[calc(100vw-32px)]">
+              {/* Path / Current directory info */}
+              <div className="p-2 border-b">
+                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Current Directory</span>
+                <div className="flex items-center gap-1.5 text-xs text-blue-600 overflow-x-auto py-1 scrollbar-none">
+                  <FolderOpen className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                  <button
+                    onClick={() => setCurrentPath(rootFolder)}
+                    className="hover:underline whitespace-nowrap font-semibold"
+                  >
+                    Root
+                  </button>
+                  {breadcrumbs.map((crumb, index) => (
+                    <div key={index} className="flex items-center gap-1 shrink-0">
+                      <ChevronRight className="w-3 h-3 text-gray-400" />
+                      <button
+                        onClick={() => handleBreadcrumbClick(index)}
+                        className="hover:underline whitespace-nowrap"
+                      >
+                        {crumb}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              
+              {/* Other Actions */}
+              <DropdownMenuItem
+                onClick={() => setShowNewFolderInput(!showNewFolderInput)}
+                className="cursor-pointer"
+              >
+                <FolderPlus className="w-4 h-4 mr-2 text-blue-500" />
+                New Folder
+              </DropdownMenuItem>
+              
+              <DropdownMenuSeparator />
+              
+              <div className="p-2">
+                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-2">View Mode</span>
+                <div className="grid grid-cols-2 gap-1">
+                  <Button
+                    variant={viewMode === 'list' ? 'secondary' : 'ghost'}
+                    size="sm"
+                    onClick={() => setViewMode('list')}
+                    className="h-8 text-xs cursor-pointer"
+                  >
+                    <List className="w-3.5 h-3.5 mr-1.5" />
+                    List
+                  </Button>
+                  <Button
+                    variant={viewMode === 'grid' ? 'secondary' : 'ghost'}
+                    size="sm"
+                    onClick={() => setViewMode('grid')}
+                    className="h-8 text-xs cursor-pointer"
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5 mr-1.5" />
+                    Grid
+                  </Button>
+                </div>
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -521,7 +680,7 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
             <div className="text-center py-8 text-muted-foreground animate-pulse">Loading...</div>
           ) : objects.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground italic">No files or folders found here.</div>
-          ) : (
+          ) : viewMode === 'list' ? (
             <div className="space-y-2">
               {objects.map((obj, index) => {
                 const isUploading = uploadingFiles.has(obj.key);
@@ -568,9 +727,9 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
                           </div>
                         );
                       })()}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className="text-sm font-medium truncate text-card-foreground">{fileName}</p>
+                      <div className="min-w-0 flex-1 flex flex-col justify-center">
+                        <div className="flex items-center gap-2 w-full min-w-0">
+                          <p className="text-sm font-medium truncate text-card-foreground min-w-0">{fileName}</p>
                           {fileExt && (
                             <Badge 
                               variant="outline" 
@@ -581,12 +740,12 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
                           )}
                         </div>
                         {!obj.isDirectory && (
-                          <p className="text-xs text-muted-foreground flex items-center gap-2 flex-wrap mt-0.5">
-                            <span>{formatFileSize(obj.size)}</span>
-                            <span className="text-slate-400 dark:text-slate-600">•</span>
+                          <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5 truncate w-full">
+                            <span className="shrink-0">{formatFileSize(obj.size)}</span>
+                            <span className="text-slate-400 dark:text-slate-600 shrink-0">•</span>
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <span className="cursor-help hover:underline decoration-dotted decoration-muted-foreground/40">
+                                <span className="cursor-help hover:underline decoration-dotted decoration-muted-foreground/40 truncate">
                                   Uploaded {formatDistanceToNow(new Date(obj.lastModified), { addSuffix: true })}
                                 </span>
                               </TooltipTrigger>
@@ -732,6 +891,133 @@ export function FileExplorer({ s3Manager }: FileExplorerProps) {
                         </div>
                       </>
                     )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              {objects.map((obj, index) => {
+                const isUploading = uploadingFiles.has(obj.key);
+                const { name: fileName, ext: fileExt } = getFileNameAndExtension(obj.key, obj.isDirectory);
+                return (
+                  <div
+                    key={index}
+                    onClick={() => obj.isDirectory ? navigateToFolder(obj.key) : handleVisit(obj)}
+                    className="relative group flex flex-col items-center justify-between p-4 bg-card hover:bg-muted/40 border rounded-xl transition duration-150 cursor-pointer text-center aspect-square select-none"
+                  >
+                    {/* Top Right Action Button for Files */}
+                    {!obj.isDirectory && (
+                      <div 
+                        className="absolute top-2 right-2 md:opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity z-10"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 cursor-pointer bg-card/80 hover:bg-card border shadow-sm">
+                              <MoreVertical className="w-3.5 h-3.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-40">
+                            <DropdownMenuItem onClick={() => handlePreview(obj)} className="cursor-pointer">
+                              <Eye className="w-4 h-4 mr-2" />
+                              Preview
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleCopyUrl(obj.key)} className="cursor-pointer">
+                              <Copy className="w-4 h-4 mr-2" />
+                              Copy URL
+                            </DropdownMenuItem>
+                            <DropdownMenuItem 
+                              onClick={async () => {
+                                try {
+                                  const url = await s3Manager.getSignedDownloadUrl(obj.key);
+                                  const a = document.createElement('a');
+                                  a.href = url;
+                                  a.download = obj.key.split('/').pop() || 'download';
+                                  a.click();
+                                  toast.success('Download started');
+                                } catch (err) {
+                                  toast.error('Failed to download');
+                                }
+                              }} 
+                              className="cursor-pointer"
+                            >
+                              <Download className="w-4 h-4 mr-2" />
+                              Download
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleVisit(obj)} className="cursor-pointer text-blue-500 focus:text-blue-600">
+                              <ExternalLink className="w-4 h-4 mr-2" />
+                              Open in New Tab
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => setDeleteTarget(obj)} className="cursor-pointer text-red-600 focus:text-red-700">
+                              <Trash2 className="w-4 h-4 mr-2" />
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    )}
+
+                    {/* Graphic/Icon Representation */}
+                    <div className="flex-1 flex items-center justify-center w-full min-h-0">
+                      {(() => {
+                        if (obj.isDirectory) {
+                          return <Folder className="w-16 h-16 text-blue-500 shrink-0" />;
+                        }
+                        if (isImageFile(obj.key)) {
+                          const thumbUrl = imageUrls[obj.key];
+                          if (thumbUrl) {
+                            return (
+                              <div className="w-20 h-20 rounded-lg border bg-muted overflow-hidden flex items-center justify-center shadow-sm shrink-0">
+                                <img 
+                                  src={thumbUrl} 
+                                  alt={obj.key.split('/').pop()} 
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                            );
+                          }
+                          return (
+                            <div className="w-20 h-20 rounded-lg border bg-muted/40 animate-pulse flex items-center justify-center shrink-0">
+                              <File className="w-8 h-8 text-slate-400" />
+                            </div>
+                          );
+                        }
+                        return (
+                          <div className="w-20 h-20 rounded-lg border bg-muted/20 flex items-center justify-center relative shrink-0">
+                            <File className="w-10 h-10 text-gray-400" />
+                            {fileExt && (
+                              <Badge 
+                                variant="outline" 
+                                className="absolute bottom-1 right-1 text-[8px] px-1 py-0 bg-background/90 font-mono text-muted-foreground uppercase font-semibold border-muted/80"
+                              >
+                                {fileExt}
+                              </Badge>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+
+                    {/* Metadata & Title */}
+                    <div className="w-full mt-2 shrink-0">
+                      <div className="flex items-center justify-center gap-1 min-w-0">
+                        <p className="text-xs font-semibold truncate text-card-foreground max-w-[80%]">{fileName}</p>
+                        {isImageFile(obj.key) && fileExt && (
+                          <Badge 
+                            variant="outline" 
+                            className="text-[8px] px-0.5 py-0 bg-muted/40 font-mono text-muted-foreground uppercase font-semibold border-muted/80 scale-90 shrink-0"
+                          >
+                            {fileExt}
+                          </Badge>
+                        )}
+                      </div>
+                      {!obj.isDirectory && (
+                        <p className="text-[9px] text-muted-foreground truncate mt-0.5">
+                          {formatFileSize(obj.size)}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 );
               })}

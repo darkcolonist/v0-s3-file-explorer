@@ -114,10 +114,33 @@ export default function Home() {
   };
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-    setS3Manager(null);
-    toast.success('Logged out');
+    const toastId = toast.loading('Logging you out...');
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error('Error during Supabase signout:', err);
+    } finally {
+      // Clear react states
+      setUser(null);
+      setS3Manager(null);
+
+      // Clean up Supabase client cached values in localStorage
+      try {
+        if (typeof window !== 'undefined') {
+          for (let i = localStorage.length - 1; i >= 0; i--) {
+            const key = localStorage.key(i);
+            if (key && (key.startsWith('sb-') || key.includes('supabase'))) {
+              localStorage.removeItem(key);
+            }
+          }
+        }
+      } catch (storageErr) {
+        console.error('Error clearing local storage:', storageErr);
+      }
+
+      toast.dismiss(toastId);
+      toast.success('Logged out');
+    }
   };
 
   const handleConfigSaved = async () => {

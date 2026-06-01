@@ -1,0 +1,14 @@
+# AI assistant rules for this project
+
+# Package Manager
+- ALWAYS use pnpm. Never use npm or yarn.
+- Install command: `pnpm install`
+- Add command: `pnpm add <package>`
+- Dev command: `pnpm dev`
+- Build command: `pnpm build`
+
+# Architecture Guidelines
+- Next.js 16 (App Router)
+- Tailwind CSS with Shadcn UI (vanilla CSS, CSS variables for theming)
+- Supabase for Auth & Config storage
+- AWS SDK v3 wrapper in `lib/s3-client.ts` for browser-based direct storage queries

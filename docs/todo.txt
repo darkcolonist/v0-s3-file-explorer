@@ -17,6 +17,11 @@
 / 2026-06-01 why not possible to preview images (png etc) when i click png, preview not available
 / 2026-06-01 mobile view looks messed up, fix it
 / 2026-06-01 left side icons and image previews aren't same size (width and height) and because of this the filename is following different alignments
-
 / 2026-06-01 the upload file button is too bright, not following darkmode or lightmode
 / 2026-06-01 topbar not looking well on mobile mode
+/ 2026-06-01 add list, grid thumbnail view instead of just details view
+/ 2026-06-01 for the root (dir path), new folder, refresh, list, grid. make all of these a single utility button group along with upload files, upload files is the one with label and is at the far left, default color (blue?), others are icons only, show an icon near the path
+/ 2026-06-01 when i click logout sometimes nothing happens, maybe show logging you out then if there's an error or similar that happens during logout, just clear everything in auth cache for the page
+/ 2026-06-01 can you move the current directory (root is what i see right now) into the toolbar beside upload files
+
+- the current routing of the app is /#somewhereelse can you make it into something like /somewhereelse and also, add another button not sure what its called but it acts as a url wrapper eg., https://very/long/path/to/s3 will become https://ourapp/{some details}/{filename}
