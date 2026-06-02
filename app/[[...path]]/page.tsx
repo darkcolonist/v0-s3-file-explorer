@@ -5,12 +5,12 @@ import { supabase } from '@/lib/supabase-client';
 import { getSessionWithTimeout } from '@/lib/auth-session';
 import { clearSupabaseAuthStorage } from '@/lib/clear-supabase-auth-storage';
 import { logAuthError, resolveAuthError } from '@/lib/auth-error-messages';
-import { isAuthRelatedConfigError, signOutForAuthRecovery } from '@/lib/auth-recovery';
+import { signOutForAuthRecovery } from '@/lib/auth-recovery';
 import {
   CREDENTIAL_DECRYPT_TOAST,
-  decryptCredentials,
-  isEncryptionKeyConfigured,
-} from '@/lib/encryption';
+  ENCRYPTION_KEY_SERVER_TOAST,
+} from '@/lib/encryption-messages';
+import { fetchS3ConfigFromApi } from '@/lib/s3-config-api';
 import { S3Manager } from '@/lib/s3-client';
 import { AuthView } from '@/components/auth-view';
 import { S3ConfigModal } from '@/components/s3-config-modal';
@@ -49,7 +49,6 @@ function s3ConfigFingerprint(
 const isEnvIncomplete = (): boolean => {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  const encryptionKey = process.env.NEXT_PUBLIC_ENCRYPTION_KEY;
 
   return (
     !supabaseUrl ||
@@ -58,10 +57,7 @@ const isEnvIncomplete = (): boolean => {
     supabaseUrl.includes('your-project') ||
     !supabaseAnonKey ||
     supabaseAnonKey === 'placeholder-key' ||
-    supabaseAnonKey === 'your-anon-key' ||
-    !encryptionKey ||
-    encryptionKey === 'default-key-change-in-production' ||
-    encryptionKey === 'your-secret-key'
+    supabaseAnonKey === 'your-anon-key'
   );
 };
 
@@ -92,69 +88,61 @@ export default function Home() {
     }
   }, []);
 
-  const loadS3Config = useCallback(
-    async (userId: string) => {
-      try {
-        const { data, error } = await supabase
-          .from('user_s3_configs')
-          .select('*')
-          .eq('user_id', userId)
-          .single();
+  const loadS3Config = useCallback(async () => {
+    try {
+      const result = await fetchS3ConfigFromApi();
 
-        if (error) {
-          if (isAuthRelatedConfigError(error)) {
-            await recoverFromCredentialsMismatch();
-            return;
-          }
-          setS3Manager(null);
+      if (!result.ok) {
+        if (result.code === 'UNAUTHORIZED') {
+          await recoverFromCredentialsMismatch();
           return;
         }
-
-        if (!data) {
+        if (result.code === 'ENCRYPTION_NOT_CONFIGURED') {
           setS3Manager(null);
+          toast.error(ENCRYPTION_KEY_SERVER_TOAST, { duration: 10000 });
           return;
         }
-
-        const credentials = decryptCredentials(data.encrypted_credentials);
-        if (!credentials) {
+        if (result.code === 'DECRYPT_FAILED') {
           setS3Manager(null);
           setConfigModalOpen(true);
-          if (!isEncryptionKeyConfigured()) {
-            toast.error(
-              'NEXT_PUBLIC_ENCRYPTION_KEY is missing or still a placeholder in this deployment. Set it in your host env, redeploy, then re-save S3 credentials.',
-              { duration: 10000 }
-            );
-          } else {
-            toast.error(CREDENTIAL_DECRYPT_TOAST, { duration: 10000 });
-          }
+          toast.error(CREDENTIAL_DECRYPT_TOAST, { duration: 10000 });
           return;
         }
-
-        const managerConfig: S3Config = {
-          accessKeyId: credentials.accessKeyId,
-          secretAccessKey: credentials.secretAccessKey,
-          region: data.region,
-          bucket: data.bucket,
-          endpoint: credentials.endpoint,
-          forcePathStyle: data.provider === 'digitalocean',
-          rootFolder: credentials.rootFolder,
-        };
-        const fingerprint = s3ConfigFingerprint(data, credentials);
-
-        setS3Manager((prev) => {
-          if (prev && s3ConfigFingerprintRef.current === fingerprint) {
-            return prev;
-          }
-          s3ConfigFingerprintRef.current = fingerprint;
-          return new S3Manager(managerConfig);
-        });
-      } catch (err) {
-        console.error('Failed to load S3 config:', err);
+        console.error('Failed to load S3 config:', result.message);
         setS3Manager(null);
+        return;
       }
-    },
-    [recoverFromCredentialsMismatch]
-  );
+
+      if (!result.config) {
+        setS3Manager(null);
+        return;
+      }
+
+      const { config } = result;
+      const { credentials } = config;
+      const managerConfig: S3Config = {
+        accessKeyId: credentials.accessKeyId,
+        secretAccessKey: credentials.secretAccessKey,
+        region: config.region,
+        bucket: config.bucket,
+        endpoint: credentials.endpoint,
+        forcePathStyle: config.provider === 'digitalocean',
+        rootFolder: credentials.rootFolder,
+      };
+      const fingerprint = s3ConfigFingerprint(config, credentials);
+
+      setS3Manager((prev) => {
+        if (prev && s3ConfigFingerprintRef.current === fingerprint) {
+          return prev;
+        }
+        s3ConfigFingerprintRef.current = fingerprint;
+        return new S3Manager(managerConfig);
+      });
+    } catch (err) {
+      console.error('Failed to load S3 config:', err);
+      setS3Manager(null);
+    }
+  }, [recoverFromCredentialsMismatch]);
   const envIncomplete = isEnvIncomplete();
 
   useEffect(() => {
@@ -185,7 +173,7 @@ export default function Home() {
         }
         if (session?.user) {
           setUser(session.user);
-          await loadS3Config(session.user.id);
+          await loadS3Config();
         }
       } catch (err) {
         logAuthError(resolveAuthError(err, 'session_init'), err);
@@ -206,7 +194,7 @@ export default function Home() {
         if (session?.user) {
           setUser(session.user);
           if (S3_CONFIG_AUTH_EVENTS.includes(event)) {
-            void loadS3Config(session.user.id);
+            void loadS3Config();
           }
         } else if (event === 'SIGNED_OUT') {
           setUser(null);
@@ -243,7 +231,7 @@ export default function Home() {
 
   const handleConfigSaved = async () => {
     if (user) {
-      await loadS3Config(user.id);
+      await loadS3Config();
       setExplorerKey((k) => k + 1);
       toast.success('S3 configuration loaded');
     }

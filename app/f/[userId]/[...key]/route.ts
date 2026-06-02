@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { decryptCredentials } from '@/lib/encryption';
+import { decryptCredentials } from '@/lib/encryption-server';
 import { S3Manager } from '@/lib/s3-client';
 
 export async function GET(

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -25,11 +25,22 @@ interface EnvVarStatus {
 
 export function EnvWarning() {
   const [copied, setCopied] = useState(false);
+  const [encryptionServerStatus, setEncryptionServerStatus] = useState<
+    EnvVarStatus['status'] | 'loading'
+  >('loading');
+
+  useEffect(() => {
+    fetch('/api/env-check')
+      .then((res) => res.json())
+      .then((data: { encryptionConfigured?: boolean }) => {
+        setEncryptionServerStatus(data.encryptionConfigured ? 'configured' : 'missing');
+      })
+      .catch(() => setEncryptionServerStatus('missing'));
+  }, []);
 
   const getEnvStatus = (): { overallIncomplete: boolean; vars: EnvVarStatus[] } => {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    const encryptionKey = process.env.NEXT_PUBLIC_ENCRYPTION_KEY;
 
     const vars: EnvVarStatus[] = [
       {
@@ -53,18 +64,18 @@ export function EnvWarning() {
         description: 'The anonymous public API key for your Supabase project.'
       },
       {
-        name: 'NEXT_PUBLIC_ENCRYPTION_KEY',
-        value: encryptionKey,
-        status: !encryptionKey 
-          ? 'missing' 
-          : (encryptionKey === 'default-key-change-in-production' || encryptionKey === 'your-secret-key')
-            ? 'placeholder' 
-            : 'configured',
-        description: 'Used to securely encrypt your S3 credentials in the database.'
-      }
+        name: 'ENCRYPTION_KEY',
+        value: encryptionServerStatus === 'configured' ? '(set on server)' : undefined,
+        status:
+          encryptionServerStatus === 'loading' ? 'missing' : encryptionServerStatus,
+        description:
+          'Server-only secret for encrypting S3 credentials in the database. Set in Vercel/host env (not NEXT_PUBLIC). Legacy NEXT_PUBLIC_ENCRYPTION_KEY is still read if present.',
+      },
     ];
 
-    const overallIncomplete = vars.some(v => v.status === 'missing' || v.status === 'placeholder');
+    const overallIncomplete = vars.some(
+      (v) => v.status === 'missing' || v.status === 'placeholder'
+    );
 
     return { overallIncomplete, vars };
   };
@@ -75,8 +86,8 @@ export function EnvWarning() {
 NEXT_PUBLIC_SUPABASE_URL=${process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://your-project.supabase.co'}
 NEXT_PUBLIC_SUPABASE_ANON_KEY=${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'your-anon-key'}
 
-# Encryption (use a unique secret string)
-NEXT_PUBLIC_ENCRYPTION_KEY=${process.env.NEXT_PUBLIC_ENCRYPTION_KEY || 'your-secret-key'}`;
+# Encryption (server-only — do not use NEXT_PUBLIC_)
+ENCRYPTION_KEY=your-secret-key`;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(envTemplate);

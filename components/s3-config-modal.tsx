@@ -8,8 +8,8 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import toast from 'react-hot-toast';
-import { supabase } from '@/lib/supabase-client';
-import { CREDENTIAL_DECRYPT_TOAST, encryptCredentials, decryptCredentials } from '@/lib/encryption';
+import { CREDENTIAL_DECRYPT_TOAST, ENCRYPTION_KEY_SERVER_TOAST } from '@/lib/encryption-messages';
+import { fetchS3ConfigFromApi, saveS3ConfigToApi } from '@/lib/s3-config-api';
 import { S3Manager } from '@/lib/s3-client';
 
 interface S3ConfigModalProps {
@@ -39,34 +39,25 @@ export function S3ConfigModal({ open, onClose, onConfigSaved }: S3ConfigModalPro
     if (open) {
       const loadSavedConfig = async () => {
         try {
-          const { data: { user } } = await supabase.auth.getUser();
-          if (!user) return;
-
-          const { data, error } = await supabase
-            .from('user_s3_configs')
-            .select('*')
-            .eq('user_id', user.id)
-            .single();
-
-          if (error || !data) return;
-
-          setProvider(data.provider);
-          setBucket(data.bucket);
-          setRegion(data.region);
-          
-          const credentials = decryptCredentials(data.encrypted_credentials);
-          if (!credentials) {
-            toast.error(CREDENTIAL_DECRYPT_TOAST, { duration: 10000 });
-            setAccessKeyId('');
-            setSecretAccessKey('');
-            setEndpoint('');
-            setRootFolder('');
+          const result = await fetchS3ConfigFromApi();
+          if (!result.ok) {
+            if (result.code === 'ENCRYPTION_NOT_CONFIGURED') {
+              toast.error(ENCRYPTION_KEY_SERVER_TOAST, { duration: 10000 });
+            } else if (result.code === 'DECRYPT_FAILED') {
+              toast.error(CREDENTIAL_DECRYPT_TOAST, { duration: 10000 });
+            }
             return;
           }
-          setAccessKeyId(credentials.accessKeyId || '');
-          setSecretAccessKey(credentials.secretAccessKey || '');
-          setEndpoint(credentials.endpoint || '');
-          setRootFolder(credentials.rootFolder || '');
+          if (!result.config) return;
+
+          const { config } = result;
+          setProvider(config.provider);
+          setBucket(config.bucket);
+          setRegion(config.region);
+          setAccessKeyId(config.credentials.accessKeyId || '');
+          setSecretAccessKey(config.credentials.secretAccessKey || '');
+          setEndpoint(config.credentials.endpoint || '');
+          setRootFolder(config.credentials.rootFolder || '');
         } catch (err) {
           console.error('Failed to load saved config in modal:', err);
         }
@@ -198,36 +189,26 @@ export function S3ConfigModal({ open, onClose, onConfigSaved }: S3ConfigModalPro
 
     setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        toast.error('User not authenticated');
-        return;
-      }
+      const result = await saveS3ConfigToApi({
+        provider,
+        bucket,
+        region,
+        credentials: {
+          accessKeyId,
+          secretAccessKey,
+          ...(provider === 'digitalocean' && { endpoint }),
+          rootFolder,
+        },
+      });
 
-      const credentials = {
-        accessKeyId,
-        secretAccessKey,
-        ...(provider === 'digitalocean' && { endpoint }),
-        rootFolder,
-      };
-
-      const encryptedCredentials = encryptCredentials(credentials);
-
-      const { error } = await supabase
-        .from('user_s3_configs')
-        .upsert(
-          {
-            user_id: user.id,
-            provider,
-            bucket,
-            region,
-            encrypted_credentials: encryptedCredentials,
-          },
-          { onConflict: 'user_id' }
-        );
-
-      if (error) {
-        toast.error(`Failed to save configuration: ${error.message}`);
+      if (!result.ok) {
+        if (result.code === 'UNAUTHORIZED') {
+          toast.error('User not authenticated');
+        } else if (result.code === 'ENCRYPTION_NOT_CONFIGURED') {
+          toast.error(ENCRYPTION_KEY_SERVER_TOAST, { duration: 10000 });
+        } else {
+          toast.error(`Failed to save configuration: ${result.message}`);
+        }
         return;
       }
 
