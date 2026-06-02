@@ -66,6 +66,7 @@ export default function Home() {
   const [s3Manager, setS3Manager] = useState<S3Manager | null>(null);
   const [configModalOpen, setConfigModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [s3ConfigLoading, setS3ConfigLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [explorerKey, setExplorerKey] = useState(0);
   const recoveringSessionRef = useRef(false);
@@ -89,6 +90,7 @@ export default function Home() {
   }, []);
 
   const loadS3Config = useCallback(async () => {
+    setS3ConfigLoading(true);
     try {
       const result = await fetchS3ConfigFromApi();
 
@@ -141,6 +143,8 @@ export default function Home() {
     } catch (err) {
       console.error('Failed to load S3 config:', err);
       setS3Manager(null);
+    } finally {
+      setS3ConfigLoading(false);
     }
   }, [recoverFromCredentialsMismatch]);
   const envIncomplete = isEnvIncomplete();
@@ -187,7 +191,7 @@ export default function Home() {
 
     const { data: authListener } = supabase.auth.onAuthStateChange(
       (event, session) => {
-        if (event === 'INITIAL_SESSION' || event === 'SIGNED_OUT') {
+        if (event === 'SIGNED_OUT') {
           finishInitialLoad();
         }
 
@@ -307,7 +311,11 @@ export default function Home() {
 
       {/* Main Content */}
       <div className="max-w-none w-full px-4 md:px-8 py-8">
-        {!s3Manager ? (
+        {s3ConfigLoading ? (
+          <div className="flex items-center justify-center py-16 text-muted-foreground animate-pulse">
+            Loading storage configuration…
+          </div>
+        ) : !s3Manager ? (
           <Card>
             <CardHeader>
               <CardTitle>No S3 Configuration</CardTitle>

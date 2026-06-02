@@ -1,13 +1,19 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, type MouseEvent, type PointerEvent } from 'react';
 import { computePageSize, getViewportSize, MIN_PAGE_SIZE } from '@/lib/viewport-page-size';
+import {
+  getStoredViewMode,
+  storeViewMode,
+  type ExplorerViewMode,
+} from '@/lib/view-mode-storage';
 import { formatDistanceToNow, format } from 'date-fns';
 import { S3Manager, S3Object } from '@/lib/s3-client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import {
   Folder,
@@ -91,13 +97,16 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
   const [currentPath, setCurrentPath] = useState(rootFolder);
   const [breadcrumbs, setBreadcrumbs] = useState<string[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<S3Object | null>(null);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState<Set<string>>(new Set());
   const [overwriteTarget, setOverwriteTarget] = useState<{ file: File; key: string } | null>(null);
   const [selectedFile, setSelectedFile] = useState<S3Object | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState('');
   const [showNewFolderInput, setShowNewFolderInput] = useState(false);
-  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
+  const [viewMode, setViewMode] = useState<ExplorerViewMode>(() => getStoredViewMode());
 
   // Search & Pagination States
   const [searchQuery, setSearchQuery] = useState('');
@@ -129,6 +138,14 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
   const s3SearchQueryRef = useRef(s3SearchQuery);
   s3SearchQueryRef.current = s3SearchQuery;
   const prevRootFolderRef = useRef(rootFolder);
+
+  useEffect(() => {
+    setSelectedKeys(new Set());
+  }, [currentPath]);
+
+  useEffect(() => {
+    storeViewMode(viewMode);
+  }, [viewMode]);
 
   // Synchronize starting currentPath from the URL path on mount
   useEffect(() => {
@@ -279,6 +296,12 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
         return null;
       }
       return current;
+    });
+    setSelectedKeys((prev) => {
+      if (!prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
     });
   }, []);
 
@@ -534,6 +557,50 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
     }
   };
 
+  const toggleFileSelection = (key: string, selected: boolean) => {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (selected) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    const keys = Array.from(selectedKeys);
+    if (keys.length === 0) return;
+
+    setBulkDeleting(true);
+    try {
+      const results = await Promise.allSettled(
+        keys.map((key) => s3Manager.deleteObject(key))
+      );
+      const succeeded = results.filter((r) => r.status === 'fulfilled').length;
+      const failed = results.length - succeeded;
+
+      keys.forEach((key, i) => {
+        if (results[i].status === 'fulfilled') removeObjectFromList(key);
+      });
+      setSelectedKeys(new Set());
+      setBulkDeleteOpen(false);
+
+      if (failed === 0) {
+        toast.success(
+          succeeded === 1 ? 'File deleted' : `Deleted ${succeeded} files`
+        );
+      } else if (succeeded > 0) {
+        toast.error(`Deleted ${succeeded} files; ${failed} failed`);
+      } else {
+        toast.error('Failed to delete selected files');
+      }
+    } catch (err) {
+      toast.error('Failed to delete selected files');
+      console.error(err);
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   const handlePreview = async (file: S3Object) => {
     setSelectedFile(file);
     try {
@@ -621,13 +688,34 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
     }
   };
 
+  const renderFileUrlLine = (signedUrl?: string) => (
+    <div className="pt-1.5 mt-1 border-t border-border/60 min-w-0">
+      <p className="text-[10px] font-medium text-muted-foreground mb-0.5">File URL</p>
+      {signedUrl ? (
+        <a
+          href={signedUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+          title={signedUrl}
+          className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline block truncate max-w-[260px]"
+        >
+          {signedUrl}
+        </a>
+      ) : (
+        <span className="text-[10px] text-muted-foreground italic">Loading URL…</span>
+      )}
+    </div>
+  );
+
   const renderFileItemDetails = (
     obj: S3Object,
     fileName: string,
     fileExt: string,
-    options?: { signedUrl?: string }
+    options?: { signedUrl?: string; includeUrl?: boolean }
   ) => (
-    <div className="space-y-1 text-left max-w-[280px] pointer-events-auto">
+    <div className="space-y-1 text-left max-w-[280px] pointer-events-auto min-w-0">
       <p className="font-medium text-sm leading-snug break-words">{fileName}</p>
       {fileExt && (
         <p className="text-[10px] font-mono uppercase text-muted-foreground">{fileExt}</p>
@@ -645,26 +733,114 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
           </p>
         </>
       )}
-      <p className="text-[10px] text-muted-foreground break-all leading-tight">{obj.key}</p>
-      {!obj.isDirectory && (
-        <div className="pt-1.5 mt-1 border-t border-border/60">
-          <p className="text-[10px] font-medium text-muted-foreground mb-0.5">File URL</p>
-          {options?.signedUrl ? (
-            <a
-              href={options.signedUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-              className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline break-all leading-tight block"
-            >
-              {options.signedUrl}
-            </a>
-          ) : (
-            <span className="text-[10px] text-muted-foreground italic">Loading URL…</span>
-          )}
-        </div>
-      )}
+      <p className="text-[10px] text-muted-foreground truncate" title={obj.key}>
+        {obj.key}
+      </p>
+      {!obj.isDirectory && options?.includeUrl !== false && renderFileUrlLine(options?.signedUrl)}
+    </div>
+  );
+
+  const renderFileTooltipActions = (obj: S3Object, isUploading: boolean) => {
+    const stopEvent = (e: MouseEvent | PointerEvent) => e.stopPropagation();
+    const iconBtn =
+      'h-9 w-9 p-0 shrink-0 cursor-pointer bg-muted/50 hover:bg-muted border border-border/60';
+
+    return (
+      <div
+        role="toolbar"
+        aria-label="File actions"
+        className="grid grid-cols-5 gap-1.5 w-[220px] pb-2.5 mb-2 border-b border-border/60"
+        onClick={stopEvent}
+        onPointerDown={stopEvent}
+      >
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className={iconBtn}
+          disabled={isUploading}
+          aria-label="Preview"
+          title="Preview"
+          onClick={() => handlePreview(obj)}
+        >
+          <Eye className="w-4 h-4" />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className={iconBtn}
+          disabled={isUploading}
+          aria-label="Copy URL"
+          title="Copy URL"
+          onClick={() => handleCopyUrl(obj.key)}
+        >
+          <Copy className="w-4 h-4" />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className={iconBtn}
+          disabled={isUploading}
+          aria-label="Download"
+          title="Download"
+          onClick={async () => {
+            try {
+              const url = await s3Manager.getSignedDownloadUrl(obj.key);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = obj.key.split('/').pop() || 'download';
+              a.click();
+              toast.success('Download started');
+            } catch {
+              toast.error('Failed to download');
+            }
+          }}
+        >
+          <Download className="w-4 h-4" />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className={`${iconBtn} text-blue-600 hover:text-blue-500 dark:text-blue-400`}
+          disabled={isUploading}
+          aria-label="Open in new tab"
+          title="Open in new tab"
+          onClick={() => handleVisit(obj)}
+        >
+          <ExternalLink className="w-4 h-4" />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className={`${iconBtn} text-red-600 hover:text-red-500 dark:text-red-400`}
+          disabled={isUploading}
+          aria-label="Delete"
+          title="Delete"
+          onClick={() => setDeleteTarget(obj)}
+        >
+          <Trash2 className="w-4 h-4" />
+        </Button>
+      </div>
+    );
+  };
+
+  const renderGridTooltipContent = (
+    obj: S3Object,
+    fileName: string,
+    fileExt: string,
+    isUploading: boolean
+  ) => (
+    <div className="w-[240px] max-w-[min(90vw,280px)] min-w-0 pointer-events-auto">
+      {!obj.isDirectory && renderFileTooltipActions(obj, isUploading)}
+      {renderFileItemDetails(obj, fileName, fileExt, {
+        signedUrl: fileUrls[obj.key],
+        includeUrl: false,
+      })}
+      {!obj.isDirectory && renderFileUrlLine(fileUrls[obj.key])}
     </div>
   );
 
@@ -682,8 +858,8 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
-          size="sm"
-          className="h-8 w-8 p-0 cursor-pointer bg-card/90 hover:bg-card border shadow-sm touch-manipulation"
+          size="icon"
+          className="h-7 w-7 p-0 cursor-pointer hover:bg-muted touch-manipulation"
           aria-label={`Actions for ${fileName}`}
         >
           <MoreVertical className="w-4 h-4" />
@@ -694,12 +870,6 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
         side={isMobile ? 'bottom' : 'end'}
         className="w-64 max-w-[min(100vw-2rem,18rem)]"
       >
-        <DropdownMenuLabel className="font-normal px-2 py-2 cursor-default">
-          {renderFileItemDetails(obj, fileName, fileExt, {
-            signedUrl: fileUrls[obj.key],
-          })}
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
         <DropdownMenuItem
           onClick={() => handlePreview(obj)}
           className="cursor-pointer"
@@ -752,6 +922,12 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
           <Trash2 className="w-4 h-4 mr-2" />
           Delete
         </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="font-normal px-2 py-2 cursor-default">
+          {renderFileItemDetails(obj, fileName, fileExt, {
+            signedUrl: fileUrls[obj.key],
+          })}
+        </DropdownMenuLabel>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -778,6 +954,12 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
   const sortedObjects = getFilteredAndSortedObjects();
   const paginatedObjects = sortedObjects.slice(0, visibleCount);
   const hasMore = sortedObjects.length > visibleCount;
+  const selectableFilesOnPage = paginatedObjects.filter((o) => !o.isDirectory);
+  const allPageFilesSelected =
+    selectableFilesOnPage.length > 0 &&
+    selectableFilesOnPage.every((o) => selectedKeys.has(o.key));
+  const somePageFilesSelected = selectableFilesOnPage.some((o) => selectedKeys.has(o.key));
+  const selectedCount = selectedKeys.size;
 
   return (
     <div className="space-y-4">
@@ -1104,7 +1286,44 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
       {/* File List */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Files & Folders</CardTitle>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle className="text-sm">Files & Folders</CardTitle>
+            {selectableFilesOnPage.length > 0 && (
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
+                  <Checkbox
+                    checked={
+                      allPageFilesSelected
+                        ? true
+                        : somePageFilesSelected
+                          ? 'indeterminate'
+                          : false
+                    }
+                    onCheckedChange={() => {
+                      if (allPageFilesSelected) {
+                        setSelectedKeys(new Set());
+                      } else {
+                        setSelectedKeys(new Set(selectableFilesOnPage.map((o) => o.key)));
+                      }
+                    }}
+                    aria-label="Select all files on this page"
+                  />
+                  Select page
+                </label>
+                {selectedCount > 0 && (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="cursor-pointer h-8"
+                    onClick={() => setBulkDeleteOpen(true)}
+                  >
+                    <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                    Delete {selectedCount}
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -1121,6 +1340,18 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
                     key={index}
                     className="flex items-center justify-between p-3 hover:bg-muted rounded-lg group transition duration-150"
                   >
+                    {!obj.isDirectory && (
+                      <Checkbox
+                        checked={selectedKeys.has(obj.key)}
+                        onCheckedChange={(checked) =>
+                          toggleFileSelection(obj.key, checked === true)
+                        }
+                        onClick={(e) => e.stopPropagation()}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        aria-label={`Select ${fileName}`}
+                        className="mr-2 shrink-0"
+                      />
+                    )}
                     {(() => {
                       const listPrimaryCell = (
                         <div
@@ -1443,15 +1674,31 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
                   <>
                     {!obj.isDirectory && (
                       <div
-                        className="absolute top-2 right-2 z-10 flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 focus-within:opacity-100 transition-opacity"
+                        className="absolute top-2 left-2 z-10"
+                        onClick={(e) => e.stopPropagation()}
+                        onPointerDown={(e) => e.stopPropagation()}
+                      >
+                        <Checkbox
+                          checked={selectedKeys.has(obj.key)}
+                          onCheckedChange={(checked) =>
+                            toggleFileSelection(obj.key, checked === true)
+                          }
+                          aria-label={`Select ${fileName}`}
+                          className="bg-card/90 border shadow-sm"
+                        />
+                      </div>
+                    )}
+                    {!obj.isDirectory && (
+                      <div
+                        className="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-lg border border-border/80 bg-card/95 shadow-sm p-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 focus-within:opacity-100 transition-opacity"
                         onClick={(e) => e.stopPropagation()}
                         onPointerDown={(e) => e.stopPropagation()}
                         onMouseEnter={() => prefetchUrl(obj.key)}
                       >
                         <Button
                           variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0 cursor-pointer bg-card/90 hover:bg-card border shadow-sm touch-manipulation"
+                          size="icon"
+                          className="h-7 w-7 p-0 cursor-pointer hover:bg-muted touch-manipulation"
                           aria-label={`Copy URL for ${fileName}`}
                           title="Copy URL"
                           disabled={isUploading}
@@ -1556,11 +1803,9 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
                     <TooltipContent
                       side="top"
                       sideOffset={8}
-                      className="max-w-xs p-3 text-popover-foreground pointer-events-auto"
+                      className="p-3 text-popover-foreground pointer-events-auto"
                     >
-                      {renderFileItemDetails(obj, fileName, fileExt, {
-                        signedUrl: fileUrls[obj.key],
-                      })}
+                      {renderGridTooltipContent(obj, fileName, fileExt, isUploading)}
                     </TooltipContent>
                   </Tooltip>
                 );
@@ -1662,6 +1907,27 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
           <div className="flex gap-2 justify-end">
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk Delete Confirmation */}
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete {selectedCount} {selectedCount === 1 ? 'file' : 'files'}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Really delete {selectedCount} {selectedCount === 1 ? 'file' : 'files'}? This
+              cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="flex gap-2 justify-end">
+            <AlertDialogCancel disabled={bulkDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleBulkDelete} disabled={bulkDeleting}>
+              {bulkDeleting ? 'Deleting…' : 'Delete'}
+            </AlertDialogAction>
           </div>
         </AlertDialogContent>
       </AlertDialog>

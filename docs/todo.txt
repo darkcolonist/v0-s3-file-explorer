@@ -38,4 +38,7 @@
 
 / 2026-06-01 in grid view, show a tooltip when i hover over the item, and show also more details when i click the 3-dots. make sure it works properly in mobile as well
 
-- why does it flash to screen "setup connection details" for a brief time like less than a second then loads files
+/ 2026-06-02 fix flash of "No S3 Configuration" while credentials load (s3ConfigLoading + INITIAL_SESSION race)
+/ 2026-06-02 bulk delete with select page + confirmation "Really delete N files?"
+/ 2026-06-02 grid tooltip: action buttons above details, file URL single-line ellipsis
+/ 2026-06-02 grid tooltip actions as icon toolbar; persist list/grid view in localStorage
