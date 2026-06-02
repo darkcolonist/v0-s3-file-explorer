@@ -27,12 +27,15 @@ import { Settings, LogOut, Sun, Moon } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import toast from 'react-hot-toast';
 import { Logo } from '@/components/logo';
-import type { AuthChangeEvent } from '@supabase/supabase-js';
 import type { S3Config } from '@/lib/s3-client';
 import type { S3ConfigSummary } from '@/lib/s3-config-types';
 
-/** Reload stored S3 credentials only on sign-in or explicit config updates—not token refresh. */
-const S3_CONFIG_AUTH_EVENTS: AuthChangeEvent[] = ['SIGNED_IN', 'USER_UPDATED'];
+type LoadS3ConfigOptions = {
+  /** Bypass cached config and refetch from the server. */
+  force?: boolean;
+  /** Show the full-page "Loading storage configuration…" state. */
+  showLoading?: boolean;
+};
 
 function s3ConfigFingerprint(
   row: { region: string; bucket: string; provider: string; id?: string },
@@ -103,6 +106,12 @@ export default function Home() {
   const [connectionSwitching, setConnectionSwitching] = useState(false);
   const recoveringSessionRef = useRef(false);
   const s3ConfigFingerprintRef = useRef<string | null>(null);
+  const s3ConfigLoadedRef = useRef(false);
+  const s3ConfigLoadInFlightRef = useRef<Promise<void> | null>(null);
+  const hadAuthenticatedUserRef = useRef(false);
+  const loadS3ConfigRef = useRef<
+    (userId: string, options?: LoadS3ConfigOptions) => Promise<void>
+  >(async () => {});
 
   const { theme, setTheme } = useTheme();
 
@@ -154,6 +163,9 @@ export default function Home() {
 
       const { config } = result;
       const fingerprint = s3ConfigFingerprint(config, config.credentials);
+      if (s3ConfigFingerprintRef.current === fingerprint) {
+        return true;
+      }
       s3ConfigFingerprintRef.current = fingerprint;
       setS3Manager(buildS3ManagerFromConfig(config));
       return true;
@@ -161,56 +173,88 @@ export default function Home() {
     [recoverFromCredentialsMismatch]
   );
 
-  const loadS3Config = useCallback(async (userId?: string) => {
-    setS3ConfigLoading(true);
-    try {
-      const listResult = await fetchS3ConfigListFromApi();
+  const loadS3Config = useCallback(
+    async (userId: string, options: LoadS3ConfigOptions = {}) => {
+      const { force = false, showLoading = !s3ConfigLoadedRef.current } = options;
 
-      if (!listResult.ok) {
-        if (listResult.code === 'UNAUTHORIZED') {
-          await recoverFromCredentialsMismatch();
-          return;
+      if (!force && s3ConfigLoadedRef.current && s3ConfigFingerprintRef.current) {
+        return;
+      }
+
+      if (s3ConfigLoadInFlightRef.current && !force) {
+        return s3ConfigLoadInFlightRef.current;
+      }
+
+      const run = async () => {
+        if (showLoading) {
+          setS3ConfigLoading(true);
         }
-        if (listResult.code === 'ENCRYPTION_NOT_CONFIGURED') {
-          setConnections([]);
-          setActiveConnectionId(null);
+        try {
+          const listResult = await fetchS3ConfigListFromApi();
+
+          if (!listResult.ok) {
+            if (listResult.code === 'UNAUTHORIZED') {
+              s3ConfigLoadedRef.current = false;
+              await recoverFromCredentialsMismatch();
+              return;
+            }
+            if (listResult.code === 'ENCRYPTION_NOT_CONFIGURED') {
+              setConnections([]);
+              setActiveConnectionId(null);
+              setS3Manager(null);
+              s3ConfigLoadedRef.current = false;
+              toast.error(ENCRYPTION_KEY_SERVER_TOAST, { duration: 10000 });
+              return;
+            }
+            console.error('Failed to load S3 connections:', listResult.message);
+            setConnections([]);
+            setActiveConnectionId(null);
+            setS3Manager(null);
+            s3ConfigLoadedRef.current = false;
+            return;
+          }
+
+          const configs = listResult.configs;
+          setConnections(configs);
+
+          if (!configs.length) {
+            setActiveConnectionId(null);
+            setS3Manager(null);
+            s3ConfigFingerprintRef.current = null;
+            s3ConfigLoadedRef.current = true;
+            return;
+          }
+
+          const storedId = getStoredConnectionId(userId);
+          const activeId =
+            storedId && configs.some((c) => c.id === storedId) ? storedId : configs[0].id;
+
+          setActiveConnectionId(activeId);
+          storeConnectionId(userId, activeId);
+          const loaded = await loadActiveConnection(activeId, userId);
+          s3ConfigLoadedRef.current = loaded;
+        } catch (err) {
+          console.error('Failed to load S3 config:', err);
           setS3Manager(null);
-          toast.error(ENCRYPTION_KEY_SERVER_TOAST, { duration: 10000 });
-          return;
+          s3ConfigLoadedRef.current = false;
+        } finally {
+          if (showLoading) {
+            setS3ConfigLoading(false);
+          }
+          s3ConfigLoadInFlightRef.current = null;
         }
-        console.error('Failed to load S3 connections:', listResult.message);
-        setConnections([]);
-        setActiveConnectionId(null);
-        setS3Manager(null);
-        return;
-      }
+      };
 
-      const configs = listResult.configs;
-      setConnections(configs);
+      const promise = run();
+      s3ConfigLoadInFlightRef.current = promise;
+      return promise;
+    },
+    [recoverFromCredentialsMismatch, loadActiveConnection]
+  );
 
-      if (!configs.length) {
-        setActiveConnectionId(null);
-        setS3Manager(null);
-        return;
-      }
-
-      const resolvedUserId = userId ?? user?.id;
-      const storedId = resolvedUserId ? getStoredConnectionId(resolvedUserId) : null;
-      const activeId =
-        storedId && configs.some((c) => c.id === storedId) ? storedId : configs[0].id;
-
-      setActiveConnectionId(activeId);
-      if (resolvedUserId) {
-        storeConnectionId(resolvedUserId, activeId);
-      }
-      await loadActiveConnection(activeId, resolvedUserId ?? '');
-    } catch (err) {
-      console.error('Failed to load S3 config:', err);
-      setS3Manager(null);
-    } finally {
-      setS3ConfigLoading(false);
-    }
-  }, [recoverFromCredentialsMismatch, loadActiveConnection, user?.id]);
+  useEffect(() => {
+    loadS3ConfigRef.current = loadS3Config;
+  }, [loadS3Config]);
 
   const handleConnectionChange = useCallback(
     async (connectionId: string) => {
@@ -264,7 +308,10 @@ export default function Home() {
         }
         if (session?.user) {
           setUser(session.user);
-          await loadS3Config(session.user.id);
+          hadAuthenticatedUserRef.current = true;
+          if (!s3ConfigLoadedRef.current) {
+            await loadS3ConfigRef.current(session.user.id, { showLoading: true });
+          }
         }
       } catch (err) {
         logAuthError(resolveAuthError(err, 'session_init'), err);
@@ -284,10 +331,20 @@ export default function Home() {
 
         if (session?.user) {
           setUser(session.user);
-          if (S3_CONFIG_AUTH_EVENTS.includes(event)) {
-            void loadS3Config(session.user.id);
+          if (event === 'USER_UPDATED') {
+            void loadS3ConfigRef.current(session.user.id, {
+              force: true,
+              showLoading: false,
+            });
+          } else if (event === 'SIGNED_IN' && !hadAuthenticatedUserRef.current) {
+            hadAuthenticatedUserRef.current = true;
+            void loadS3ConfigRef.current(session.user.id, { showLoading: true });
+          } else {
+            hadAuthenticatedUserRef.current = true;
           }
         } else if (event === 'SIGNED_OUT') {
+          hadAuthenticatedUserRef.current = false;
+          s3ConfigLoadedRef.current = false;
           setUser(null);
           setS3Manager(null);
           setConnections([]);
@@ -301,7 +358,7 @@ export default function Home() {
       cancelled = true;
       authListener.subscription.unsubscribe();
     };
-  }, [envIncomplete, loadS3Config]);
+  }, [envIncomplete]);
 
   const handleLogout = async () => {
     const toastId = toast.loading('Logging you out...');
@@ -316,6 +373,8 @@ export default function Home() {
       setConnections([]);
       setActiveConnectionId(null);
       s3ConfigFingerprintRef.current = null;
+      s3ConfigLoadedRef.current = false;
+      hadAuthenticatedUserRef.current = false;
 
       clearSupabaseAuthStorage();
 
@@ -326,7 +385,7 @@ export default function Home() {
 
   const handleConfigSaved = async () => {
     if (user) {
-      await loadS3Config(user.id);
+      await loadS3Config(user.id, { force: true, showLoading: false });
       setExplorerKey((k) => k + 1);
       toast.success('S3 configuration loaded');
     }
