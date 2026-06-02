@@ -23,7 +23,9 @@ export async function GET(
       .from('user_s3_configs')
       .select('*')
       .eq('user_id', userId)
-      .single();
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
 
     if (error || !data) {
       return new NextResponse('Configuration not found', { status: 404 });

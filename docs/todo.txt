@@ -42,3 +42,9 @@
 / 2026-06-02 bulk delete with select page + confirmation "Really delete N files?"
 / 2026-06-02 grid tooltip: action buttons above details, file URL single-line ellipsis
 / 2026-06-02 grid tooltip actions as icon toolbar; persist list/grid view in localStorage
+
+/ 2026-06-02 multiple s3 connection details per user, then user can select which connection from the current directory button toolbar, it will default to the first connection but if i selected another connection it will be stored as default in local storage hence when i reload the page it will load that connection. store these connection details into supabase i think the schema might need to be changed.
+
+/ 2026-06-02 when setting up a new connection, as i type connection name and if the bucket name is empty, the bucket name will follow connection name.
+/ 2026-06-02 after i put the endpoint url and the region is empty, try to get the region from the bucket url eg., nyc3, sgp1, etc
+/ 2026-06-02 on responsive mobile, clicking the 3 dots beside refresh, the storage connection is above, move it at the bottom, move view mode above putting the current directory and new folder buttons in the middle

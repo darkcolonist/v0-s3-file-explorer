@@ -33,6 +33,8 @@ import {
   FolderPlus,
   FolderOpen,
   Share2,
+  HardDrive,
+  ChevronDown,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
@@ -54,10 +56,15 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { MediaPlayer } from './media-player';
 import { useIsMobile } from '@/hooks/use-mobile';
+import type { S3ConfigSummary } from '@/lib/s3-config-types';
 
 interface FileExplorerProps {
   s3Manager: S3Manager;
   user: any;
+  connections?: S3ConfigSummary[];
+  activeConnectionId?: string | null;
+  onConnectionChange?: (connectionId: string) => void;
+  connectionSwitching?: boolean;
 }
 
 interface UploadStatus {
@@ -86,7 +93,14 @@ const isImageFile = (key: string) => {
   return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext);
 };
 
-export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
+export function FileExplorer({
+  s3Manager,
+  user,
+  connections = [],
+  activeConnectionId,
+  onConnectionChange,
+  connectionSwitching = false,
+}: FileExplorerProps) {
   const isMobile = useIsMobile();
   const rootFolder = s3Manager.config.rootFolder 
     ? (s3Manager.config.rootFolder.endsWith('/') ? s3Manager.config.rootFolder : s3Manager.config.rootFolder + '/') 
@@ -147,15 +161,14 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
     storeViewMode(viewMode);
   }, [viewMode]);
 
-  // Synchronize starting currentPath from the URL path on mount
+  // Sync starting path from URL only on mount (connection switches reset URL to /)
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const decoded = decodeURIComponent(window.location.pathname);
       const segments = decoded.split('/').filter(Boolean);
-      
-      // If we are on the share link route `/f/...`, do not hijack routing
+
       if (window.location.pathname.startsWith('/f/')) return;
-      
+
       if (segments.length === 0) {
         setCurrentPath(rootFolder);
       } else {
@@ -167,7 +180,8 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
         }
       }
     }
-  }, [rootFolder]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only apply URL on mount per connection
+  }, []);
 
   // Synchronize URL path with currentPath when navigating
   useEffect(() => {
@@ -960,6 +974,59 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
     selectableFilesOnPage.every((o) => selectedKeys.has(o.key));
   const somePageFilesSelected = selectableFilesOnPage.some((o) => selectedKeys.has(o.key));
   const selectedCount = selectedKeys.size;
+  const activeConnection =
+    connections.find((c) => c.id === activeConnectionId) ?? connections[0] ?? null;
+  const showConnectionSwitcher = connections.length > 1 && onConnectionChange;
+
+  const renderConnectionSwitcher = (className?: string) => {
+    if (!showConnectionSwitcher || !activeConnection) return null;
+
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={connectionSwitching}
+            className={`h-9 rounded-none border-r border-border px-2.5 gap-1.5 shrink-0 max-w-[180px] sm:max-w-[220px] ${className ?? ''}`}
+            aria-label="Switch storage connection"
+          >
+            <HardDrive className="w-4 h-4 text-blue-500 shrink-0" />
+            <span className="truncate text-xs font-medium">
+              {connectionSwitching ? 'Switching…' : activeConnection.name}
+            </span>
+            <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-64 max-w-[calc(100vw-32px)]">
+          <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">
+            Storage connection
+          </DropdownMenuLabel>
+          {connections.map((connection) => (
+            <DropdownMenuItem
+              key={connection.id}
+              className="cursor-pointer flex flex-col items-start gap-0.5 py-2"
+              disabled={connectionSwitching}
+              onClick={() => onConnectionChange?.(connection.id)}
+            >
+              <span
+                className={
+                  connection.id === activeConnectionId
+                    ? 'font-semibold text-blue-600 dark:text-blue-400'
+                    : 'font-medium'
+                }
+              >
+                {connection.name}
+              </span>
+              <span className="text-[10px] text-muted-foreground font-mono truncate w-full">
+                {connection.bucket} · {connection.region}
+              </span>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -1000,6 +1067,8 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
               Upload Files
             </label>
           </Button>
+
+          {renderConnectionSwitcher()}
 
           {/* Current Path / Breadcrumbs */}
           <div className="flex items-center gap-2 px-3 py-1 border-r border-border text-sm overflow-x-auto min-w-[120px] max-w-[250px] sm:max-w-md md:max-w-xl shrink-0 select-none h-9">
@@ -1132,44 +1201,11 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-64 max-w-[calc(100vw-32px)]">
-              {/* Path / Current directory info */}
+              {/* View mode — top */}
               <div className="p-2 border-b">
-                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Current Directory</span>
-                <div className="flex items-center gap-1.5 text-xs text-blue-600 overflow-x-auto py-1 scrollbar-none">
-                  <FolderOpen className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                  <button
-                    onClick={() => setCurrentPath(rootFolder)}
-                    className="hover:underline whitespace-nowrap font-semibold"
-                  >
-                    Root
-                  </button>
-                  {breadcrumbs.map((crumb, index) => (
-                    <div key={index} className="flex items-center gap-1 shrink-0">
-                      <ChevronRight className="w-3 h-3 text-gray-400" />
-                      <button
-                        onClick={() => handleBreadcrumbClick(index)}
-                        className="hover:underline whitespace-nowrap"
-                      >
-                        {crumb}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              
-              {/* Other Actions */}
-              <DropdownMenuItem
-                onClick={() => setShowNewFolderInput(!showNewFolderInput)}
-                className="cursor-pointer"
-              >
-                <FolderPlus className="w-4 h-4 mr-2 text-blue-500" />
-                New Folder
-              </DropdownMenuItem>
-              
-              <DropdownMenuSeparator />
-              
-              <div className="p-2">
-                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-2">View Mode</span>
+                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-2">
+                  View mode
+                </span>
                 <div className="grid grid-cols-2 gap-1">
                   <Button
                     variant={viewMode === 'list' ? 'secondary' : 'ghost'}
@@ -1191,6 +1227,72 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
                   </Button>
                 </div>
               </div>
+
+              {/* Current directory — middle */}
+              <div className="p-2 border-b">
+                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">
+                  Current directory
+                </span>
+                <div className="flex items-center gap-1.5 text-xs text-blue-600 overflow-x-auto py-1 scrollbar-none">
+                  <FolderOpen className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                  <button
+                    onClick={() => setCurrentPath(rootFolder)}
+                    className="hover:underline whitespace-nowrap font-semibold"
+                  >
+                    Root
+                  </button>
+                  {breadcrumbs.map((crumb, index) => (
+                    <div key={index} className="flex items-center gap-1 shrink-0">
+                      <ChevronRight className="w-3 h-3 text-gray-400" />
+                      <button
+                        onClick={() => handleBreadcrumbClick(index)}
+                        className="hover:underline whitespace-nowrap"
+                      >
+                        {crumb}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <DropdownMenuItem
+                onClick={() => setShowNewFolderInput(!showNewFolderInput)}
+                className="cursor-pointer"
+              >
+                <FolderPlus className="w-4 h-4 mr-2 text-blue-500" />
+                New folder
+              </DropdownMenuItem>
+
+              {showConnectionSwitcher && activeConnection && (
+                <>
+                  <DropdownMenuSeparator />
+                  <div className="p-2">
+                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">
+                      Storage connection
+                    </span>
+                    <div className="space-y-1">
+                      {connections.map((connection) => (
+                        <button
+                          key={connection.id}
+                          type="button"
+                          disabled={connectionSwitching}
+                          onClick={() => onConnectionChange?.(connection.id)}
+                          className={`w-full text-left rounded-md px-2 py-1.5 text-xs hover:bg-muted ${
+                            connection.id === activeConnectionId
+                              ? 'bg-muted font-semibold text-blue-600 dark:text-blue-400'
+                              : ''
+                          }`}
+                        >
+                          <span className="block truncate">{connection.name}</span>
+                          <span className="block truncate text-[10px] text-muted-foreground font-mono">
+                            {connection.bucket}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -1326,8 +1428,10 @@ export function FileExplorer({ s3Manager, user }: FileExplorerProps) {
           </div>
         </CardHeader>
         <CardContent>
-          {loading ? (
-            <div className="text-center py-8 text-muted-foreground animate-pulse">Loading...</div>
+          {loading || connectionSwitching ? (
+            <div className="text-center py-8 text-muted-foreground animate-pulse">
+              {connectionSwitching ? 'Switching connection…' : 'Loading...'}
+            </div>
           ) : objects.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground italic">No files or folders found here.</div>
           ) : viewMode === 'list' ? (

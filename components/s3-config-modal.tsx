@@ -1,24 +1,64 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import toast from 'react-hot-toast';
 import { CREDENTIAL_DECRYPT_TOAST, ENCRYPTION_KEY_SERVER_TOAST } from '@/lib/encryption-messages';
-import { fetchS3ConfigFromApi, saveS3ConfigToApi } from '@/lib/s3-config-api';
+import {
+  deleteS3ConfigFromApi,
+  fetchS3ConfigFromApi,
+  fetchS3ConfigListFromApi,
+  saveS3ConfigToApi,
+} from '@/lib/s3-config-api';
 import { S3Manager } from '@/lib/s3-client';
+import type { S3ConfigSummary } from '@/lib/s3-config-types';
+
+function connectionNameToBucketName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9.-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function extractDoRegionFromEndpoint(endpoint: string): string | null {
+  try {
+    const url = new URL(endpoint.includes('://') ? endpoint : `https://${endpoint}`);
+    const parts = url.hostname.toLowerCase().split('.');
+    const doIdx = parts.indexOf('digitaloceanspaces');
+    if (doIdx >= 1) {
+      const region = parts[doIdx - 1];
+      if (/^[a-z0-9]+$/.test(region)) return region;
+    }
+  } catch {
+    // ignore invalid URLs while typing
+  }
+  return null;
+}
 
 interface S3ConfigModalProps {
   open: boolean;
   onClose: () => void;
   onConfigSaved: () => void;
+  connections?: S3ConfigSummary[];
 }
 
-export function S3ConfigModal({ open, onClose, onConfigSaved }: S3ConfigModalProps) {
+export function S3ConfigModal({
+  open,
+  onClose,
+  onConfigSaved,
+  connections = [],
+}: S3ConfigModalProps) {
+  const [savedConnections, setSavedConnections] = useState<S3ConfigSummary[]>(connections);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [name, setName] = useState('');
   const [provider, setProvider] = useState<'aws' | 'digitalocean'>('aws');
   const [bucket, setBucket] = useState('');
   const [region, setRegion] = useState('us-east-1');
@@ -34,38 +74,130 @@ export function S3ConfigModal({ open, onClose, onConfigSaved }: S3ConfigModalPro
   const [browserFolders, setBrowserFolders] = useState<string[]>([]);
   const [browserLoading, setBrowserLoading] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const formSessionRef = useRef(0);
+  const bucketAutoSyncRef = useRef(true);
+  const regionAutoSyncRef = useRef(true);
+
+  const resetForm = useCallback(() => {
+    formSessionRef.current += 1;
+    bucketAutoSyncRef.current = true;
+    regionAutoSyncRef.current = true;
+    setEditingId(null);
+    setName('');
+    setProvider('aws');
+    setBucket('');
+    setRegion('us-east-1');
+    setAccessKeyId('');
+    setSecretAccessKey('');
+    setEndpoint('');
+    setRootFolder('');
+    setShowFolderBrowser(false);
+    setShowSecretKey(false);
+    setBrowserCurrentPath('');
+    setBrowserFolders([]);
+    setNewFolderName('');
+  }, []);
+
+  const applyConfigToForm = useCallback((config: {
+    id: string;
+    name: string;
+    provider: 'aws' | 'digitalocean';
+    bucket: string;
+    region: string;
+    credentials: {
+      accessKeyId?: string;
+      secretAccessKey?: string;
+      endpoint?: string;
+      rootFolder?: string;
+    };
+  }) => {
+    bucketAutoSyncRef.current = false;
+    regionAutoSyncRef.current = false;
+    setEditingId(config.id);
+    setName(config.name);
+    setProvider(config.provider);
+    setBucket(config.bucket);
+    setRegion(config.region);
+    setAccessKeyId(config.credentials.accessKeyId || '');
+    setSecretAccessKey(config.credentials.secretAccessKey || '');
+    setEndpoint(config.credentials.endpoint || '');
+    setRootFolder(config.credentials.rootFolder || '');
+    setShowFolderBrowser(false);
+    setBrowserCurrentPath('');
+    setBrowserFolders([]);
+    setNewFolderName('');
+  }, []);
+
+  const createFormS3Manager = useCallback(() => {
+    if (provider === 'digitalocean' && !endpoint) {
+      throw new Error('Endpoint is required for DigitalOcean Spaces');
+    }
+
+    return new S3Manager({
+      accessKeyId,
+      secretAccessKey,
+      region,
+      bucket,
+      endpoint: provider === 'digitalocean' ? endpoint : undefined,
+      forcePathStyle: provider === 'digitalocean',
+    });
+  }, [accessKeyId, secretAccessKey, region, bucket, endpoint, provider]);
+
+  const loadConnectionIntoForm = useCallback(async (connectionId: string) => {
+    const session = formSessionRef.current;
+    try {
+      const result = await fetchS3ConfigFromApi(connectionId);
+      if (session !== formSessionRef.current) return;
+
+      if (!result.ok) {
+        if (result.code === 'ENCRYPTION_NOT_CONFIGURED') {
+          toast.error(ENCRYPTION_KEY_SERVER_TOAST, { duration: 10000 });
+        } else if (result.code === 'DECRYPT_FAILED') {
+          toast.error(CREDENTIAL_DECRYPT_TOAST, { duration: 10000 });
+        } else {
+          toast.error(`Failed to load connection: ${result.message}`);
+        }
+        return;
+      }
+      if (!result.config) {
+        toast.error('Connection not found');
+        return;
+      }
+      if (session !== formSessionRef.current) return;
+      applyConfigToForm(result.config);
+    } catch (err) {
+      console.error('Failed to load connection in modal:', err);
+      toast.error('Failed to load connection');
+    }
+  }, [applyConfigToForm]);
 
   useEffect(() => {
-    if (open) {
-      const loadSavedConfig = async () => {
-        try {
-          const result = await fetchS3ConfigFromApi();
-          if (!result.ok) {
-            if (result.code === 'ENCRYPTION_NOT_CONFIGURED') {
-              toast.error(ENCRYPTION_KEY_SERVER_TOAST, { duration: 10000 });
-            } else if (result.code === 'DECRYPT_FAILED') {
-              toast.error(CREDENTIAL_DECRYPT_TOAST, { duration: 10000 });
-            }
-            return;
-          }
-          if (!result.config) return;
+    setSavedConnections(connections);
+  }, [connections]);
 
-          const { config } = result;
-          setProvider(config.provider);
-          setBucket(config.bucket);
-          setRegion(config.region);
-          setAccessKeyId(config.credentials.accessKeyId || '');
-          setSecretAccessKey(config.credentials.secretAccessKey || '');
-          setEndpoint(config.credentials.endpoint || '');
-          setRootFolder(config.credentials.rootFolder || '');
-        } catch (err) {
-          console.error('Failed to load saved config in modal:', err);
+  useEffect(() => {
+    if (!open) return;
+
+    let cancelled = false;
+    const refreshConnections = async () => {
+      try {
+        const listResult = await fetchS3ConfigListFromApi();
+        if (cancelled) return;
+        if (listResult.ok) {
+          setSavedConnections(listResult.configs);
         }
-      };
+        resetForm();
+      } catch (err) {
+        console.error('Failed to load saved config in modal:', err);
+      }
+    };
 
-      loadSavedConfig();
-    }
-  }, [open]);
+    void refreshConnections();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, resetForm]);
 
   const loadBrowserFolders = async (path: string) => {
     if (!bucket || !region || !accessKeyId || !secretAccessKey) {
@@ -75,14 +207,7 @@ export function S3ConfigModal({ open, onClose, onConfigSaved }: S3ConfigModalPro
 
     setBrowserLoading(true);
     try {
-      const tempManager = new S3Manager({
-        accessKeyId,
-        secretAccessKey,
-        region,
-        bucket,
-        endpoint: provider === 'digitalocean' ? endpoint : undefined,
-        forcePathStyle: provider === 'digitalocean',
-      });
+      const tempManager = createFormS3Manager();
 
       const items = await tempManager.listObjects(path);
       const folders = items
@@ -107,14 +232,7 @@ export function S3ConfigModal({ open, onClose, onConfigSaved }: S3ConfigModalPro
 
     setBrowserLoading(true);
     try {
-      const tempManager = new S3Manager({
-        accessKeyId,
-        secretAccessKey,
-        region,
-        bucket,
-        endpoint: provider === 'digitalocean' ? endpoint : undefined,
-        forcePathStyle: provider === 'digitalocean',
-      });
+      const tempManager = createFormS3Manager();
 
       await tempManager.uploadObject(folderKey, new Blob([]), 'application/x-directory');
       toast.success(`Folder "${folderName}" created`);
@@ -131,6 +249,10 @@ export function S3ConfigModal({ open, onClose, onConfigSaved }: S3ConfigModalPro
   const handleOpenFolderBrowser = () => {
     if (!bucket || !region || !accessKeyId || !secretAccessKey) {
       toast.error('Please configure your credentials and bucket name first');
+      return;
+    }
+    if (provider === 'digitalocean' && !endpoint) {
+      toast.error('Endpoint is required for DigitalOcean Spaces');
       return;
     }
     setShowFolderBrowser(true);
@@ -151,14 +273,7 @@ export function S3ConfigModal({ open, onClose, onConfigSaved }: S3ConfigModalPro
     setTesting(true);
     const toastId = toast.loading('Testing S3 connection...');
     try {
-      const tempManager = new S3Manager({
-        accessKeyId,
-        secretAccessKey,
-        region,
-        bucket,
-        endpoint: provider === 'digitalocean' ? endpoint : undefined,
-        forcePathStyle: provider === 'digitalocean',
-      });
+      const tempManager = createFormS3Manager();
 
       // Attempt to list objects (this is a lightweight call to verify credentials/permissions/endpoints)
       await tempManager.listObjects();
@@ -177,6 +292,11 @@ export function S3ConfigModal({ open, onClose, onConfigSaved }: S3ConfigModalPro
   };
 
   const handleSave = async () => {
+    if (!name.trim()) {
+      toast.error('Connection name is required');
+      return;
+    }
+
     if (!bucket || !region || !accessKeyId || !secretAccessKey) {
       toast.error('All fields are required');
       return;
@@ -190,6 +310,8 @@ export function S3ConfigModal({ open, onClose, onConfigSaved }: S3ConfigModalPro
     setLoading(true);
     try {
       const result = await saveS3ConfigToApi({
+        ...(editingId ? { id: editingId } : {}),
+        name: name.trim(),
         provider,
         bucket,
         region,
@@ -212,13 +334,7 @@ export function S3ConfigModal({ open, onClose, onConfigSaved }: S3ConfigModalPro
         return;
       }
 
-      toast.success('S3 configuration saved');
-      setBucket('');
-      setAccessKeyId('');
-      setSecretAccessKey('');
-      setEndpoint('');
-      setRootFolder('');
-      setShowFolderBrowser(false);
+      toast.success(editingId ? 'Connection updated' : 'Connection saved');
       onConfigSaved();
       onClose();
     } catch (err) {
@@ -229,133 +345,244 @@ export function S3ConfigModal({ open, onClose, onConfigSaved }: S3ConfigModalPro
     }
   };
 
+  const handleDelete = async () => {
+    if (!editingId) return;
+    if (!window.confirm(`Delete connection "${name}"? This cannot be undone.`)) return;
+
+    setDeleting(true);
+    try {
+      const result = await deleteS3ConfigFromApi(editingId);
+      if (!result.ok) {
+        toast.error(`Failed to delete connection: ${result.message}`);
+        return;
+      }
+
+      toast.success('Connection deleted');
+      onConfigSaved();
+      onClose();
+    } catch (err) {
+      toast.error('An error occurred while deleting the connection');
+      console.error(err);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleConnectionSelect = (value: string) => {
+    if (value === '__new__') {
+      resetForm();
+      return;
+    }
+    void loadConnectionIntoForm(value);
+  };
+
+  const connectionSelectValue = editingId ?? '__new__';
+  const formBusy = loading || testing || deleting;
+
+  const handleNameChange = (value: string) => {
+    setName(value);
+    if (bucketAutoSyncRef.current) {
+      setBucket(connectionNameToBucketName(value));
+    }
+  };
+
+  const handleBucketChange = (value: string) => {
+    bucketAutoSyncRef.current = false;
+    setBucket(value);
+  };
+
+  const handleRegionChange = (value: string) => {
+    regionAutoSyncRef.current = false;
+    setRegion(value);
+  };
+
+  const handleProviderChange = (value: 'aws' | 'digitalocean') => {
+    setProvider(value);
+    if (value === 'digitalocean' && region === 'us-east-1') {
+      regionAutoSyncRef.current = true;
+      setRegion('');
+    }
+  };
+
+  const handleEndpointChange = (value: string) => {
+    setEndpoint(value);
+    if (provider !== 'digitalocean') return;
+
+    const canAutoFillRegion =
+      regionAutoSyncRef.current || !region.trim() || region === 'us-east-1';
+    if (!canAutoFillRegion) return;
+
+    const extracted = extractDoRegionFromEndpoint(value);
+    if (extracted) {
+      regionAutoSyncRef.current = true;
+      setRegion(extracted);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-md sm:max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Configure S3 Storage</DialogTitle>
-          <DialogDescription>Add your S3 or DigitalOcean Spaces credentials</DialogDescription>
+          <DialogDescription>
+            Manage your S3 or DigitalOcean Spaces connections
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
-          {/* Provider Selection */}
-          <div>
-            <Label htmlFor="provider">Provider</Label>
-            <Select value={provider} onValueChange={(value) => setProvider(value as 'aws' | 'digitalocean')}>
-              <SelectTrigger id="provider">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="aws">AWS S3</SelectItem>
-                <SelectItem value="digitalocean">DigitalOcean Spaces</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Bucket Name */}
-          <div>
-            <Label htmlFor="bucket">Bucket Name</Label>
-            <Input
-              id="bucket"
-              placeholder="my-bucket"
-              value={bucket}
-              onChange={(e) => setBucket(e.target.value)}
-            />
-          </div>
-
-          {/* Region */}
-          <div>
-            <Label htmlFor="region">Region</Label>
-            {provider === 'aws' ? (
-              <Select value={region} onValueChange={setRegion}>
-                <SelectTrigger id="region">
-                  <SelectValue />
+          {savedConnections.length > 0 && (
+            <div className="space-y-2">
+              <Label htmlFor="saved-connection">Saved connection</Label>
+              <Select
+                value={connectionSelectValue}
+                onValueChange={handleConnectionSelect}
+                disabled={formBusy}
+              >
+                <SelectTrigger id="saved-connection" className="w-full">
+                  <SelectValue placeholder="Select a connection" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="us-east-1">US East (N. Virginia)</SelectItem>
-                  <SelectItem value="us-west-2">US West (Oregon)</SelectItem>
-                  <SelectItem value="eu-west-1">Europe (Ireland)</SelectItem>
-                  <SelectItem value="ap-southeast-1">Asia Pacific (Singapore)</SelectItem>
+                  <SelectItem value="__new__">+ New connection</SelectItem>
+                  {savedConnections.map((connection) => (
+                    <SelectItem key={connection.id} value={connection.id}>
+                      {connection.name} ({connection.bucket})
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
-            ) : (
-              <Input
-                id="region"
-                placeholder="nyc3"
-                value={region}
-                onChange={(e) => setRegion(e.target.value)}
-              />
-            )}
-          </div>
-
-          {/* Endpoint for DigitalOcean */}
-          {provider === 'digitalocean' && (
-            <div>
-              <Label htmlFor="endpoint">Endpoint URL</Label>
-              <Input
-                id="endpoint"
-                placeholder="https://nyc3.digitaloceanspaces.com"
-                value={endpoint}
-                onChange={(e) => setEndpoint(e.target.value)}
-              />
             </div>
           )}
 
-          {/* Access Key ID */}
-          <div>
-            <Label htmlFor="access-key">Access Key ID</Label>
-            <Input
-              id="access-key"
-              placeholder="AKIA2EXAMPLE"
-              value={accessKeyId}
-              onChange={(e) => setAccessKeyId(e.target.value)}
-            />
-          </div>
-
-          {/* Secret Access Key */}
-          <div>
-            <Label htmlFor="secret-key">Secret Access Key</Label>
-            <div className="flex gap-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="md:col-span-2">
+              <Label htmlFor="connection-name">Connection name</Label>
               <Input
-                id="secret-key"
-                type={showSecretKey ? 'text' : 'password'}
-                placeholder="••••••••••••••••"
-                value={secretAccessKey}
-                onChange={(e) => setSecretAccessKey(e.target.value)}
+                id="connection-name"
+                placeholder="e.g. Production, Personal backup"
+                value={name}
+                onChange={(e) => handleNameChange(e.target.value)}
               />
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowSecretKey(!showSecretKey)}
-              >
-                {showSecretKey ? 'Hide' : 'Show'}
-              </Button>
             </div>
-          </div>
 
-          {/* Root Directory / Start Path */}
-          <div className="space-y-2">
-            <Label htmlFor="root-folder">Root Directory (Optional)</Label>
-            <div className="flex gap-2">
-              <Input
-                id="root-folder"
-                placeholder="e.g. photos/ or leave empty for bucket root"
-                value={rootFolder}
-                onChange={(e) => setRootFolder(e.target.value)}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleOpenFolderBrowser}
-                disabled={loading || testing || browserLoading}
-              >
-                Browse Folders
-              </Button>
+            <div>
+              <Label htmlFor="provider">Provider</Label>
+              <Select value={provider} onValueChange={(value) => handleProviderChange(value as 'aws' | 'digitalocean')}>
+                <SelectTrigger id="provider">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="aws">AWS S3</SelectItem>
+                  <SelectItem value="digitalocean">DigitalOcean Spaces</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Define a starting path. The file explorer will start here and restrict access above it.
-            </p>
+
+            <div>
+              <Label htmlFor="bucket">Bucket name</Label>
+              <Input
+                id="bucket"
+                placeholder="my-bucket"
+                value={bucket}
+                onChange={(e) => handleBucketChange(e.target.value)}
+              />
+            </div>
+
+            <div className={provider === 'aws' ? 'md:col-span-2' : ''}>
+              <Label htmlFor="region">Region</Label>
+              {provider === 'aws' ? (
+                <Select value={region} onValueChange={handleRegionChange}>
+                  <SelectTrigger id="region">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="us-east-1">US East (N. Virginia)</SelectItem>
+                    <SelectItem value="us-west-2">US West (Oregon)</SelectItem>
+                    <SelectItem value="eu-west-1">Europe (Ireland)</SelectItem>
+                    <SelectItem value="ap-southeast-1">Asia Pacific (Singapore)</SelectItem>
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  id="region"
+                  placeholder="nyc3"
+                  value={region}
+                  onChange={(e) => handleRegionChange(e.target.value)}
+                />
+              )}
+            </div>
+
+            {provider === 'digitalocean' && (
+              <div>
+                <Label htmlFor="endpoint">Endpoint URL</Label>
+                <Input
+                  id="endpoint"
+                  placeholder="https://nyc3.digitaloceanspaces.com"
+                  value={endpoint}
+                  onChange={(e) => handleEndpointChange(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Use the regional endpoint, not the bucket URL.
+                </p>
+              </div>
+            )}
+
+            <div>
+              <Label htmlFor="access-key">Access key ID</Label>
+              <Input
+                id="access-key"
+                placeholder="AKIA2EXAMPLE"
+                value={accessKeyId}
+                onChange={(e) => setAccessKeyId(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="secret-key">Secret access key</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="secret-key"
+                  type={showSecretKey ? 'text' : 'password'}
+                  placeholder="••••••••••••••••"
+                  value={secretAccessKey}
+                  onChange={(e) => setSecretAccessKey(e.target.value)}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  className="shrink-0"
+                  onClick={() => setShowSecretKey(!showSecretKey)}
+                >
+                  {showSecretKey ? 'Hide' : 'Show'}
+                </Button>
+              </div>
+            </div>
+
+            <div className="md:col-span-2 space-y-2">
+              <Label htmlFor="root-folder">Root directory (optional)</Label>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Input
+                  id="root-folder"
+                  placeholder="e.g. photos/ or leave empty for bucket root"
+                  value={rootFolder}
+                  onChange={(e) => setRootFolder(e.target.value)}
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={handleOpenFolderBrowser}
+                  disabled={loading || testing || browserLoading}
+                >
+                  Browse folders
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Define a starting path. The file explorer will start here and restrict access above it.
+              </p>
+            </div>
           </div>
 
           {/* Folder Browser Card */}
@@ -473,10 +700,9 @@ export function S3ConfigModal({ open, onClose, onConfigSaved }: S3ConfigModalPro
             </Card>
           )}
 
-          {/* Info Cards */}
           <Card className="bg-muted/50 border-0">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm">Credentials Security</CardTitle>
+              <CardTitle className="text-sm">Credentials security</CardTitle>
             </CardHeader>
             <CardContent className="text-xs text-muted-foreground">
               Your credentials are encrypted before being stored in our database. Never share your secret access key.
@@ -485,21 +711,33 @@ export function S3ConfigModal({ open, onClose, onConfigSaved }: S3ConfigModalPro
         </div>
 
         {/* Action Buttons */}
-        <div className="flex flex-col sm:flex-row gap-2 justify-between mt-6">
-          <Button 
-            variant="secondary" 
-            onClick={handleTestConnection} 
-            disabled={loading || testing}
-            className="w-full sm:w-auto"
-          >
-            {testing ? 'Testing...' : 'Test Connection'}
-          </Button>
-          <div className="flex gap-2 justify-end w-full sm:w-auto">
-            <Button variant="outline" onClick={onClose} disabled={loading || testing} className="w-full sm:w-auto">
+        <div className="flex flex-col lg:flex-row gap-2 justify-between mt-6">
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button
+              variant="secondary"
+              onClick={handleTestConnection}
+              disabled={formBusy}
+              className="w-full sm:w-auto"
+            >
+              {testing ? 'Testing...' : 'Test connection'}
+            </Button>
+            {editingId && (
+              <Button
+                variant="destructive"
+                onClick={handleDelete}
+                disabled={formBusy}
+                className="w-full sm:w-auto"
+              >
+                {deleting ? 'Deleting...' : 'Delete'}
+              </Button>
+            )}
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2 lg:justify-end w-full lg:w-auto">
+            <Button variant="outline" onClick={onClose} disabled={formBusy} className="w-full sm:w-auto">
               Cancel
             </Button>
-            <Button onClick={handleSave} disabled={loading || testing} className="w-full sm:w-auto">
-              {loading ? 'Saving...' : 'Save Configuration'}
+            <Button onClick={handleSave} disabled={formBusy} className="w-full sm:w-auto">
+              {loading ? 'Saving...' : editingId ? 'Update connection' : 'Save connection'}
             </Button>
           </div>
         </div>

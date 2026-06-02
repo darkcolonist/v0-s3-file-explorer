@@ -24,6 +24,25 @@ export interface S3Object {
   isDirectory: boolean;
 }
 
+/** Avoid double bucket in path when DO endpoint uses bucket subdomain + path-style URLs. */
+export function normalizeSpacesEndpoint(
+  endpoint: string,
+  bucket: string,
+  region: string
+): string {
+  try {
+    const url = new URL(endpoint.includes('://') ? endpoint : `https://${endpoint}`);
+    const hostname = url.hostname.toLowerCase();
+    const bucketPrefix = `${bucket.toLowerCase()}.`;
+    if (hostname.startsWith(bucketPrefix) && hostname.endsWith('.digitaloceanspaces.com')) {
+      url.hostname = `${region.toLowerCase()}.digitaloceanspaces.com`;
+    }
+    return url.origin;
+  } catch {
+    return endpoint;
+  }
+}
+
 export class S3Manager {
   private client: S3Client;
   public config: S3Config;
@@ -41,7 +60,11 @@ export class S3Manager {
 
     // Support for DigitalOcean Spaces or custom S3 endpoints
     if (config.endpoint) {
-      clientConfig.endpoint = config.endpoint;
+      const endpoint =
+        config.forcePathStyle
+          ? normalizeSpacesEndpoint(config.endpoint, config.bucket, config.region)
+          : config.endpoint;
+      clientConfig.endpoint = endpoint;
       clientConfig.forcePathStyle = config.forcePathStyle ?? false;
     }
 

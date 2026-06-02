@@ -7,14 +7,26 @@ export type S3StoredCredentials = {
   rootFolder?: string;
 };
 
-export type S3ConfigApiData = {
+export type S3ConfigSummary = {
+  id: string;
+  name: string;
+  provider: S3Provider;
+  bucket: string;
+  region: string;
+};
+
+export type S3ConfigApiData = S3ConfigSummary & {
+  credentials: S3StoredCredentials;
+};
+
+export type S3ConfigSavePayload = {
+  id?: string;
+  name: string;
   provider: S3Provider;
   bucket: string;
   region: string;
   credentials: S3StoredCredentials;
 };
-
-export type S3ConfigSavePayload = S3ConfigApiData;
 
 export type S3ConfigApiErrorCode =
   | 'UNAUTHORIZED'

@@ -10,7 +10,12 @@ import {
   CREDENTIAL_DECRYPT_TOAST,
   ENCRYPTION_KEY_SERVER_TOAST,
 } from '@/lib/encryption-messages';
-import { fetchS3ConfigFromApi } from '@/lib/s3-config-api';
+import { fetchS3ConfigFromApi, fetchS3ConfigListFromApi } from '@/lib/s3-config-api';
+import {
+  getStoredConnectionId,
+  storeConnectionId,
+  clearStoredConnectionId,
+} from '@/lib/s3-connection-storage';
 import { S3Manager } from '@/lib/s3-client';
 import { AuthView } from '@/components/auth-view';
 import { S3ConfigModal } from '@/components/s3-config-modal';
@@ -24,18 +29,20 @@ import toast from 'react-hot-toast';
 import { Logo } from '@/components/logo';
 import type { AuthChangeEvent } from '@supabase/supabase-js';
 import type { S3Config } from '@/lib/s3-client';
+import type { S3ConfigSummary } from '@/lib/s3-config-types';
 
 /** Reload stored S3 credentials only on sign-in or explicit config updates—not token refresh. */
 const S3_CONFIG_AUTH_EVENTS: AuthChangeEvent[] = ['SIGNED_IN', 'USER_UPDATED'];
 
 function s3ConfigFingerprint(
-  row: { region: string; bucket: string; provider: string },
+  row: { region: string; bucket: string; provider: string; id?: string },
   credentials: Pick<
     S3Config,
     'accessKeyId' | 'secretAccessKey' | 'endpoint' | 'rootFolder'
   >
 ): string {
   return JSON.stringify({
+    id: row.id ?? '',
     region: row.region,
     bucket: row.bucket,
     provider: row.provider,
@@ -44,6 +51,28 @@ function s3ConfigFingerprint(
     endpoint: credentials.endpoint ?? '',
     rootFolder: credentials.rootFolder ?? '',
   });
+}
+
+function buildS3ManagerFromConfig(config: {
+  id: string;
+  provider: string;
+  region: string;
+  bucket: string;
+  credentials: Pick<
+    S3Config,
+    'accessKeyId' | 'secretAccessKey' | 'endpoint' | 'rootFolder'
+  >;
+}): S3Manager {
+  const managerConfig: S3Config = {
+    accessKeyId: config.credentials.accessKeyId,
+    secretAccessKey: config.credentials.secretAccessKey,
+    region: config.region,
+    bucket: config.bucket,
+    endpoint: config.credentials.endpoint,
+    forcePathStyle: config.provider === 'digitalocean',
+    rootFolder: config.credentials.rootFolder,
+  };
+  return new S3Manager(managerConfig);
 }
 
 const isEnvIncomplete = (): boolean => {
@@ -64,11 +93,14 @@ const isEnvIncomplete = (): boolean => {
 export default function Home() {
   const [user, setUser] = useState<any>(null);
   const [s3Manager, setS3Manager] = useState<S3Manager | null>(null);
+  const [connections, setConnections] = useState<S3ConfigSummary[]>([]);
+  const [activeConnectionId, setActiveConnectionId] = useState<string | null>(null);
   const [configModalOpen, setConfigModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [s3ConfigLoading, setS3ConfigLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [explorerKey, setExplorerKey] = useState(0);
+  const [connectionSwitching, setConnectionSwitching] = useState(false);
   const recoveringSessionRef = useRef(false);
   const s3ConfigFingerprintRef = useRef<string | null>(null);
 
@@ -89,64 +121,119 @@ export default function Home() {
     }
   }, []);
 
-  const loadS3Config = useCallback(async () => {
-    setS3ConfigLoading(true);
-    try {
-      const result = await fetchS3ConfigFromApi();
+  const loadActiveConnection = useCallback(
+    async (connectionId: string, userId: string) => {
+      const result = await fetchS3ConfigFromApi(connectionId);
 
       if (!result.ok) {
         if (result.code === 'UNAUTHORIZED') {
           await recoverFromCredentialsMismatch();
-          return;
+          return false;
         }
         if (result.code === 'ENCRYPTION_NOT_CONFIGURED') {
           setS3Manager(null);
           toast.error(ENCRYPTION_KEY_SERVER_TOAST, { duration: 10000 });
-          return;
+          return false;
         }
         if (result.code === 'DECRYPT_FAILED') {
           setS3Manager(null);
           setConfigModalOpen(true);
           toast.error(CREDENTIAL_DECRYPT_TOAST, { duration: 10000 });
-          return;
+          return false;
         }
         console.error('Failed to load S3 config:', result.message);
         setS3Manager(null);
-        return;
+        return false;
       }
 
       if (!result.config) {
+        clearStoredConnectionId(userId);
+        setS3Manager(null);
+        return false;
+      }
+
+      const { config } = result;
+      const fingerprint = s3ConfigFingerprint(config, config.credentials);
+      s3ConfigFingerprintRef.current = fingerprint;
+      setS3Manager(buildS3ManagerFromConfig(config));
+      return true;
+    },
+    [recoverFromCredentialsMismatch]
+  );
+
+  const loadS3Config = useCallback(async (userId?: string) => {
+    setS3ConfigLoading(true);
+    try {
+      const listResult = await fetchS3ConfigListFromApi();
+
+      if (!listResult.ok) {
+        if (listResult.code === 'UNAUTHORIZED') {
+          await recoverFromCredentialsMismatch();
+          return;
+        }
+        if (listResult.code === 'ENCRYPTION_NOT_CONFIGURED') {
+          setConnections([]);
+          setActiveConnectionId(null);
+          setS3Manager(null);
+          toast.error(ENCRYPTION_KEY_SERVER_TOAST, { duration: 10000 });
+          return;
+        }
+        console.error('Failed to load S3 connections:', listResult.message);
+        setConnections([]);
+        setActiveConnectionId(null);
         setS3Manager(null);
         return;
       }
 
-      const { config } = result;
-      const { credentials } = config;
-      const managerConfig: S3Config = {
-        accessKeyId: credentials.accessKeyId,
-        secretAccessKey: credentials.secretAccessKey,
-        region: config.region,
-        bucket: config.bucket,
-        endpoint: credentials.endpoint,
-        forcePathStyle: config.provider === 'digitalocean',
-        rootFolder: credentials.rootFolder,
-      };
-      const fingerprint = s3ConfigFingerprint(config, credentials);
+      const configs = listResult.configs;
+      setConnections(configs);
 
-      setS3Manager((prev) => {
-        if (prev && s3ConfigFingerprintRef.current === fingerprint) {
-          return prev;
-        }
-        s3ConfigFingerprintRef.current = fingerprint;
-        return new S3Manager(managerConfig);
-      });
+      if (!configs.length) {
+        setActiveConnectionId(null);
+        setS3Manager(null);
+        return;
+      }
+
+      const resolvedUserId = userId ?? user?.id;
+      const storedId = resolvedUserId ? getStoredConnectionId(resolvedUserId) : null;
+      const activeId =
+        storedId && configs.some((c) => c.id === storedId) ? storedId : configs[0].id;
+
+      setActiveConnectionId(activeId);
+      if (resolvedUserId) {
+        storeConnectionId(resolvedUserId, activeId);
+      }
+      await loadActiveConnection(activeId, resolvedUserId ?? '');
     } catch (err) {
       console.error('Failed to load S3 config:', err);
       setS3Manager(null);
     } finally {
       setS3ConfigLoading(false);
     }
-  }, [recoverFromCredentialsMismatch]);
+  }, [recoverFromCredentialsMismatch, loadActiveConnection, user?.id]);
+
+  const handleConnectionChange = useCallback(
+    async (connectionId: string) => {
+      if (!user?.id || connectionId === activeConnectionId || connectionSwitching) return;
+
+      setConnectionSwitching(true);
+      try {
+        const loaded = await loadActiveConnection(connectionId, user.id);
+        if (!loaded) return;
+
+        if (typeof window !== 'undefined') {
+          window.history.replaceState(null, '', '/');
+        }
+
+        storeConnectionId(user.id, connectionId);
+        setActiveConnectionId(connectionId);
+        setExplorerKey((k) => k + 1);
+      } finally {
+        setConnectionSwitching(false);
+      }
+    },
+    [user?.id, activeConnectionId, connectionSwitching, loadActiveConnection]
+  );
   const envIncomplete = isEnvIncomplete();
 
   useEffect(() => {
@@ -177,7 +264,7 @@ export default function Home() {
         }
         if (session?.user) {
           setUser(session.user);
-          await loadS3Config();
+          await loadS3Config(session.user.id);
         }
       } catch (err) {
         logAuthError(resolveAuthError(err, 'session_init'), err);
@@ -198,11 +285,13 @@ export default function Home() {
         if (session?.user) {
           setUser(session.user);
           if (S3_CONFIG_AUTH_EVENTS.includes(event)) {
-            void loadS3Config();
+            void loadS3Config(session.user.id);
           }
         } else if (event === 'SIGNED_OUT') {
           setUser(null);
           setS3Manager(null);
+          setConnections([]);
+          setActiveConnectionId(null);
           s3ConfigFingerprintRef.current = null;
         }
       }
@@ -224,6 +313,8 @@ export default function Home() {
       // Clear react states
       setUser(null);
       setS3Manager(null);
+      setConnections([]);
+      setActiveConnectionId(null);
       s3ConfigFingerprintRef.current = null;
 
       clearSupabaseAuthStorage();
@@ -235,7 +326,7 @@ export default function Home() {
 
   const handleConfigSaved = async () => {
     if (user) {
-      await loadS3Config();
+      await loadS3Config(user.id);
       setExplorerKey((k) => k + 1);
       toast.success('S3 configuration loaded');
     }
@@ -331,7 +422,15 @@ export default function Home() {
             </CardContent>
           </Card>
         ) : (
-          <FileExplorer key={explorerKey} s3Manager={s3Manager} user={user} />
+          <FileExplorer
+            key={`${activeConnectionId ?? 'none'}-${explorerKey}`}
+            s3Manager={s3Manager}
+            user={user}
+            connections={connections}
+            activeConnectionId={activeConnectionId}
+            onConnectionChange={handleConnectionChange}
+            connectionSwitching={connectionSwitching}
+          />
         )}
       </div>
 
@@ -340,6 +439,7 @@ export default function Home() {
         open={configModalOpen}
         onClose={() => setConfigModalOpen(false)}
         onConfigSaved={handleConfigSaved}
+        connections={connections}
       />
     </main>
   );

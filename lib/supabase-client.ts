@@ -6,6 +6,7 @@ export const supabase = createClient();
 export type UserS3Config = {
   id: string;
   user_id: string;
+  name: string;
   provider: 'aws' | 'digitalocean';
   bucket: string;
   region: string;
