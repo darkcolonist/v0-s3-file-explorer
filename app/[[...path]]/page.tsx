@@ -261,6 +261,7 @@ export default function Home() {
       if (!user?.id || connectionId === activeConnectionId || connectionSwitching) return;
 
       setConnectionSwitching(true);
+      setExplorerKey((k) => k + 1);
       try {
         const loaded = await loadActiveConnection(connectionId, user.id);
         if (!loaded) return;
@@ -271,7 +272,6 @@ export default function Home() {
 
         storeConnectionId(user.id, connectionId);
         setActiveConnectionId(connectionId);
-        setExplorerKey((k) => k + 1);
       } finally {
         setConnectionSwitching(false);
       }

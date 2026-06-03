@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, type ChangeEvent } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { FileDown, FileUp } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { CREDENTIAL_DECRYPT_TOAST, ENCRYPTION_KEY_SERVER_TOAST } from '@/lib/encryption-messages';
 import {
@@ -17,6 +18,12 @@ import {
 } from '@/lib/s3-config-api';
 import { S3Manager } from '@/lib/s3-client';
 import type { S3ConfigSummary } from '@/lib/s3-config-types';
+import {
+  buildExportPayload,
+  downloadExportJson,
+  parseImportJson,
+  resolveUniqueConnectionName,
+} from '@/lib/s3-config-import-export';
 
 function connectionNameToBucketName(name: string): string {
   return name
@@ -75,6 +82,8 @@ export function S3ConfigModal({
   const [browserLoading, setBrowserLoading] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
   const formSessionRef = useRef(0);
   const bucketAutoSyncRef = useRef(true);
   const regionAutoSyncRef = useRef(true);
@@ -377,7 +386,8 @@ export function S3ConfigModal({
   };
 
   const connectionSelectValue = editingId ?? '__new__';
-  const formBusy = loading || testing || deleting;
+  const formBusy = loading || testing || deleting || importing;
+  const canExport = !!editingId && !formBusy;
 
   const handleNameChange = (value: string) => {
     setName(value);
@@ -419,6 +429,89 @@ export function S3ConfigModal({
     }
   };
 
+  const handleExportConnection = () => {
+    if (!editingId) return;
+
+    if (!name.trim() || !bucket.trim() || !region.trim() || !accessKeyId || !secretAccessKey) {
+      toast.error('Connection details are incomplete');
+      return;
+    }
+
+    if (provider === 'digitalocean' && !endpoint.trim()) {
+      toast.error('Endpoint is required for DigitalOcean exports');
+      return;
+    }
+
+    downloadExportJson(
+      buildExportPayload({
+        name,
+        provider,
+        bucket,
+        region,
+        credentials: {
+          accessKeyId,
+          secretAccessKey,
+          ...(provider === 'digitalocean' && { endpoint }),
+          rootFolder,
+        },
+      })
+    );
+    toast.success('Connection exported');
+  };
+
+  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const parsed = parseImportJson(JSON.parse(text) as unknown);
+      if (!parsed.ok) {
+        toast.error(parsed.error);
+        return;
+      }
+
+      const uniqueName = resolveUniqueConnectionName(
+        parsed.payload.name,
+        savedConnections.map((c) => c.name)
+      );
+      const importPayload = { ...parsed.payload, name: uniqueName };
+
+      const result = await saveS3ConfigToApi(importPayload);
+      if (!result.ok) {
+        if (result.code === 'UNAUTHORIZED') {
+          toast.error('User not authenticated');
+        } else if (result.code === 'ENCRYPTION_NOT_CONFIGURED') {
+          toast.error(ENCRYPTION_KEY_SERVER_TOAST, { duration: 10000 });
+        } else {
+          toast.error(`Failed to import connection: ${result.message}`);
+        }
+        return;
+      }
+
+      const renamed = uniqueName !== parsed.payload.name.trim();
+      toast.success(
+        renamed
+          ? `Imported as "${uniqueName}" (name was already in use)`
+          : `Imported "${uniqueName}"`
+      );
+
+      const listResult = await fetchS3ConfigListFromApi();
+      if (listResult.ok) {
+        setSavedConnections(listResult.configs);
+      }
+
+      onConfigSaved();
+      await loadConnectionIntoForm(result.id);
+    } catch {
+      toast.error('Invalid connection JSON file');
+    } finally {
+      setImporting(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-md sm:max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -430,6 +523,40 @@ export function S3ConfigModal({
         </DialogHeader>
 
         <div className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <input
+              ref={importInputRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={handleImportFile}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={formBusy}
+              onClick={() => importInputRef.current?.click()}
+            >
+              <FileUp className="w-4 h-4 mr-1.5" />
+              {importing ? 'Importing…' : 'Import JSON'}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={!canExport}
+              onClick={handleExportConnection}
+            >
+              <FileDown className="w-4 h-4 mr-1.5" />
+              Export JSON
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground -mt-2">
+            Import saves a new connection immediately. Export is available for saved connections only
+            and includes credentials in plain text — share with trusted users only.
+          </p>
+
           {savedConnections.length > 0 && (
             <div className="space-y-2">
               <Label htmlFor="saved-connection">Saved connection</Label>

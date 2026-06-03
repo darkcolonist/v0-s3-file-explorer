@@ -56,6 +56,7 @@ import {
   DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu';
 import { MediaPlayer } from './media-player';
+import { Spinner } from '@/components/ui/spinner';
 import { useIsMobile } from '@/hooks/use-mobile';
 import type { S3ConfigSummary } from '@/lib/s3-config-types';
 
@@ -115,6 +116,8 @@ export function FileExplorer({
   const [currentPath, setCurrentPath] = useState(rootFolder);
   const [breadcrumbs, setBreadcrumbs] = useState<string[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<S3Object | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [localConnectionSwitching, setLocalConnectionSwitching] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [bulkMode, setBulkMode] = useState(false);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
@@ -157,6 +160,20 @@ export function FileExplorer({
   const s3SearchQueryRef = useRef(s3SearchQuery);
   s3SearchQueryRef.current = s3SearchQuery;
   const prevRootFolderRef = useRef(rootFolder);
+
+  useEffect(() => {
+    if (!connectionSwitching) {
+      setLocalConnectionSwitching(false);
+    }
+  }, [connectionSwitching]);
+
+  const isConnectionSwitching = connectionSwitching || localConnectionSwitching;
+
+  const handleConnectionSelect = (connectionId: string) => {
+    if (isConnectionSwitching || connectionId === activeConnectionId) return;
+    setLocalConnectionSwitching(true);
+    onConnectionChange?.(connectionId);
+  };
 
   useEffect(() => {
     setSelectedKeys(new Set());
@@ -564,16 +581,35 @@ export function FileExplorer({
   const handleDelete = async () => {
     if (!deleteTarget) return;
 
+    setDeleting(true);
     try {
       const key = deleteTarget.key;
-      await s3Manager.deleteObject(key);
-      toast.success('File deleted');
+      if (deleteTarget.isDirectory) {
+        await s3Manager.deleteEmptyFolder(key);
+        toast.success('Folder deleted');
+      } else {
+        await s3Manager.deleteObject(key);
+        toast.success('File deleted');
+      }
       setDeleteTarget(null);
       removeObjectFromList(key);
     } catch (err) {
-      toast.error('Failed to delete file');
+      if (deleteTarget.isDirectory && (err as Error).name === 'FolderNotEmptyError') {
+        toast.error('Unable to delete — folder is not empty. Remove its contents first.');
+      } else {
+        toast.error(deleteTarget.isDirectory ? 'Failed to delete folder' : 'Failed to delete file');
+      }
       console.error(err);
+    } finally {
+      setDeleting(false);
     }
+  };
+
+  const canDeleteFolder = (obj: S3Object) => {
+    if (!obj.isDirectory) return true;
+    if (obj.key === rootFolder) return false;
+    if (rootFolder && obj.key.startsWith(rootFolder) && obj.key === rootFolder) return false;
+    return true;
   };
 
   const toggleFileSelection = (key: string, selected: boolean) => {
@@ -718,6 +754,45 @@ export function FileExplorer({
     }
   };
 
+  const renderDeleteButton = (
+    obj: S3Object,
+    isUploading: boolean,
+    options?: { variant?: 'icon' | 'menu'; className?: string }
+  ) => {
+    if (!canDeleteFolder(obj)) return null;
+
+    const label = obj.isDirectory ? 'Delete Folder' : 'Delete File';
+
+    if (options?.variant === 'menu') {
+      return (
+        <DropdownMenuItem
+          onClick={() => setDeleteTarget(obj)}
+          className={`cursor-pointer text-red-600 focus:text-red-700 ${options.className ?? ''}`}
+          disabled={isUploading}
+        >
+          <Trash2 className="w-4 h-4 mr-2" />
+          Delete
+        </DropdownMenuItem>
+      );
+    }
+
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setDeleteTarget(obj)}
+            disabled={isUploading}
+            className={options?.className}
+          >
+            <Trash2 className="w-4 h-4 text-red-500" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{label}</TooltipContent>
+      </Tooltip>
+    );
+  };
   const renderFileUrlLine = (signedUrl?: string) => (
     <div className="pt-1.5 mt-1 border-t border-border/60 min-w-0">
       <p className="text-[10px] font-medium text-muted-foreground mb-0.5">File URL</p>
@@ -997,21 +1072,30 @@ export function FileExplorer({
   const renderConnectionSwitcher = (className?: string) => {
     if (!showConnectionSwitcher || !activeConnection) return null;
 
+    const switchingLabelConnection =
+      connections.find((c) => c.id === activeConnectionId) ?? activeConnection;
+
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
             variant="ghost"
             size="sm"
-            disabled={connectionSwitching}
+            disabled={isConnectionSwitching}
             className={`h-9 rounded-none border-r border-border px-2.5 gap-1.5 shrink-0 max-w-[180px] sm:max-w-[220px] ${className ?? ''}`}
             aria-label="Switch storage connection"
           >
-            <HardDrive className="w-4 h-4 text-blue-500 shrink-0" />
+            {isConnectionSwitching ? (
+              <Spinner className="w-4 h-4 text-blue-500 shrink-0" />
+            ) : (
+              <HardDrive className="w-4 h-4 text-blue-500 shrink-0" />
+            )}
             <span className="truncate text-xs font-medium">
-              {connectionSwitching ? 'Switching…' : activeConnection.name}
+              {isConnectionSwitching ? 'Switching…' : switchingLabelConnection.name}
             </span>
-            <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+            {!isConnectionSwitching && (
+              <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+            )}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-64 max-w-[calc(100vw-32px)]">
@@ -1022,17 +1106,22 @@ export function FileExplorer({
             <DropdownMenuItem
               key={connection.id}
               className="cursor-pointer flex flex-col items-start gap-0.5 py-2"
-              disabled={connectionSwitching}
-              onClick={() => onConnectionChange?.(connection.id)}
+              disabled={isConnectionSwitching}
+              onClick={() => handleConnectionSelect(connection.id)}
             >
-              <span
-                className={
-                  connection.id === activeConnectionId
-                    ? 'font-semibold text-blue-600 dark:text-blue-400'
-                    : 'font-medium'
-                }
-              >
-                {connection.name}
+              <span className="flex items-center gap-2 w-full">
+                {isConnectionSwitching && connection.id === activeConnectionId && (
+                  <Spinner className="w-3 h-3 shrink-0" />
+                )}
+                <span
+                  className={
+                    connection.id === activeConnectionId
+                      ? 'font-semibold text-blue-600 dark:text-blue-400'
+                      : 'font-medium'
+                  }
+                >
+                  {connection.name}
+                </span>
               </span>
               <span className="text-[10px] text-muted-foreground font-mono truncate w-full">
                 {connection.bucket} · {connection.region}
@@ -1291,8 +1380,8 @@ export function FileExplorer({
                         <button
                           key={connection.id}
                           type="button"
-                          disabled={connectionSwitching}
-                          onClick={() => onConnectionChange?.(connection.id)}
+                          disabled={isConnectionSwitching}
+                          onClick={() => handleConnectionSelect(connection.id)}
                           className={`w-full text-left rounded-md px-2 py-1.5 text-xs hover:bg-muted ${
                             connection.id === activeConnectionId
                               ? 'bg-muted font-semibold text-blue-600 dark:text-blue-400'
@@ -1458,9 +1547,12 @@ export function FileExplorer({
           </div>
         </CardHeader>
         <CardContent>
-          {loading || connectionSwitching ? (
-            <div className="text-center py-8 text-muted-foreground animate-pulse">
-              {connectionSwitching ? 'Switching connection…' : 'Loading...'}
+          {loading || isConnectionSwitching ? (
+            <div className="flex flex-col items-center justify-center py-8 text-muted-foreground gap-2">
+              {isConnectionSwitching && <Spinner className="w-5 h-5 text-blue-500" />}
+              <span className={isConnectionSwitching ? 'animate-pulse' : undefined}>
+                {isConnectionSwitching ? 'Switching connection…' : 'Loading...'}
+              </span>
             </div>
           ) : objects.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground italic">No files or folders found here.</div>
@@ -1714,19 +1806,7 @@ export function FileExplorer({
                             </TooltipContent>
                           </Tooltip>
 
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => setDeleteTarget(obj)}
-                                disabled={isUploading}
-                              >
-                                <Trash2 className="w-4 h-4 text-red-500" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Delete File</TooltipContent>
-                          </Tooltip>
+                          {renderDeleteButton(obj, isUploading)}
                         </div>
 
                         {/* Mobile Actions Dropdown */}
@@ -1769,10 +1849,26 @@ export function FileExplorer({
                                 Open in New Tab
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={() => setDeleteTarget(obj)} className="cursor-pointer text-red-600 focus:text-red-700">
-                                <Trash2 className="w-4 h-4 mr-2" />
-                                Delete
-                              </DropdownMenuItem>
+                              {renderDeleteButton(obj, isUploading, { variant: 'menu' })}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </>
+                    )}
+                    {obj.isDirectory && canDeleteFolder(obj) && (
+                      <>
+                        <div className="hidden md:flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2 shrink-0">
+                          {renderDeleteButton(obj, isUploading)}
+                        </div>
+                        <div className="flex md:hidden ml-2 shrink-0">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 cursor-pointer">
+                                <MoreVertical className="w-4 h-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-40">
+                              {renderDeleteButton(obj, isUploading, { variant: 'menu' })}
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </div>
@@ -1841,6 +1937,17 @@ export function FileExplorer({
                           <Copy className="w-3.5 h-3.5" />
                         </Button>
                         {renderGridItemActionsMenu(obj, isUploading, fileName, fileExt)}
+                      </div>
+                    )}
+                    {obj.isDirectory && canDeleteFolder(obj) && (
+                      <div
+                        className="absolute top-2 right-2 z-10 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 focus-within:opacity-100 transition-opacity"
+                        onClick={(e) => e.stopPropagation()}
+                        onPointerDown={(e) => e.stopPropagation()}
+                      >
+                        {renderDeleteButton(obj, isUploading, {
+                          className: 'h-7 w-7 p-0 cursor-pointer hover:bg-muted touch-manipulation',
+                        })}
                       </div>
                     )}
 
@@ -2030,17 +2137,37 @@ export function FileExplorer({
       )}
 
       {/* Delete Confirmation */}
-      <AlertDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeleteTarget(null);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete File</AlertDialogTitle>
+            <AlertDialogTitle>
+              {deleteTarget?.isDirectory ? 'Delete Folder' : 'Delete File'}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete &quot;{deleteTarget?.key.split('/').pop()}&quot;? This action cannot be undone.
+              {deleteTarget?.isDirectory ? (
+                <>
+                  Delete empty folder &quot;
+                  {deleteTarget.key.replace(/\/$/, '').split('/').pop()}&quot;? This cannot be
+                  undone. Folders with files or subfolders must be emptied first.
+                </>
+              ) : (
+                <>
+                  Are you sure you want to delete &quot;{deleteTarget?.key.split('/').pop()}&quot;?
+                  This action cannot be undone.
+                </>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="flex gap-2 justify-end">
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} disabled={deleting}>
+              {deleting ? 'Deleting…' : 'Delete'}
+            </AlertDialogAction>
           </div>
         </AlertDialogContent>
       </AlertDialog>

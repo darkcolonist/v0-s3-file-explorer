@@ -35,21 +35,21 @@
 / 2026-06-01 when i upload multiple files from drag drop, it keeps refreshing and reloading the page
 / 2026-06-01 when i delete a file it will reload the entire page, this is a problem especially if i am like at item 900 it will bring me back to initial loaded items
 / 2026-06-01 also make it possible to upload multiple files from clipboard if browser supports it
-
 / 2026-06-01 in grid view, show a tooltip when i hover over the item, and show also more details when i click the 3-dots. make sure it works properly in mobile as well
-
 / 2026-06-02 fix flash of "No S3 Configuration" while credentials load (s3ConfigLoading + INITIAL_SESSION race)
 / 2026-06-02 bulk delete with select page + confirmation "Really delete N files?"
 / 2026-06-02 grid tooltip: action buttons above details, file URL single-line ellipsis
 / 2026-06-02 grid tooltip actions as icon toolbar; persist list/grid view in localStorage
-
 / 2026-06-02 multiple s3 connection details per user, then user can select which connection from the current directory button toolbar, it will default to the first connection but if i selected another connection it will be stored as default in local storage hence when i reload the page it will load that connection. store these connection details into supabase i think the schema might need to be changed.
-
 / 2026-06-02 when setting up a new connection, as i type connection name and if the bucket name is empty, the bucket name will follow connection name.
 / 2026-06-02 after i put the endpoint url and the region is empty, try to get the region from the bucket url eg., nyc3, sgp1, etc
 / 2026-06-02 on responsive mobile, clicking the 3 dots beside refresh, the storage connection is above, move it at the bottom, move view mode above putting the current directory and new folder buttons in the middle
-
 / 2026-06-02 when i leave the tab and return it will call s3-config and show "loading storage configuration" just do this sparingly and conserve background calls when leaving the page or returning to the page etc
-
 / 2026-06-03 folder names not showing in mobile (S3 directory keys end with /)
 / 2026-06-03 checkboxes toggle only when bulk mode on, by button
+/ 2026-06-03 ability to delete folders
+/ 2026-06-03 export and import connection details json so that it can be imported by a different user if needed
+/ 2026-06-03 file explorer: when clicking a new connection show an indicator immediately that we're loading a new connection instead of waiting for server to respond to be intuitive ux
+/ 2026-06-03 the grey arrow of the tooltip is somewhat tilted in a different angle but the tooltip display is fine
+/ 2026-06-03 for the delete folders: only allow deleting empty folders; on confirm, check prefix with a single S3 list (MaxKeys=1) — succeed if truly empty, otherwise toast "Unable to delete — folder is not empty. Remove its contents first."
+/ 2026-06-03 in the configure connection details page, add icons for import and export buttons. export will be greyed out if no connection details is selected yet. it can only be exported if it is an existing connection. for import, import will create a new connection and not overwrite existing stored data in db, if same name then maybe `connection` it will become `connection-00` `connection-01` and so on.

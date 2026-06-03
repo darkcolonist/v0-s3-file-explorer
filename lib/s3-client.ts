@@ -128,6 +128,45 @@ export class S3Manager {
     }
   }
 
+  /** True when the prefix has no objects except an optional folder marker key. */
+  async isPrefixEmpty(prefix: string): Promise<boolean> {
+    const normalizedPrefix = prefix.endsWith('/') ? prefix : `${prefix}/`;
+    const command = new ListObjectsV2Command({
+      Bucket: this.config.bucket,
+      Prefix: normalizedPrefix,
+      MaxKeys: 1,
+    });
+    const response = await this.client.send(command);
+    const keys =
+      response.Contents?.map((item) => item.Key).filter(
+        (key): key is string => !!key
+      ) ?? [];
+
+    if (keys.length === 0) return true;
+    return keys.length === 1 && keys[0] === normalizedPrefix;
+  }
+
+  /** Delete a folder only if it is empty. Throws when the prefix is not empty. */
+  async deleteEmptyFolder(prefix: string): Promise<void> {
+    const normalizedPrefix = prefix.endsWith('/') ? prefix : `${prefix}/`;
+    const empty = await this.isPrefixEmpty(normalizedPrefix);
+    if (!empty) {
+      const error = new Error('Folder is not empty');
+      error.name = 'FolderNotEmptyError';
+      throw error;
+    }
+
+    try {
+      await this.deleteObject(normalizedPrefix);
+    } catch (error: unknown) {
+      const err = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+      if (err.name === 'NoSuchKey' || err.$metadata?.httpStatusCode === 404) {
+        return;
+      }
+      throw error;
+    }
+  }
+
   async uploadObject(
     key: string,
     body: Blob | File,
