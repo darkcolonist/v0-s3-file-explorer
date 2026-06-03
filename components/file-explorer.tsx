@@ -35,6 +35,7 @@ import {
   Share2,
   HardDrive,
   ChevronDown,
+  CheckSquare,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
@@ -76,8 +77,11 @@ interface UploadStatus {
 }
 
 const getFileNameAndExtension = (key: string, isDirectory: boolean) => {
+  if (isDirectory) {
+    const parts = key.split('/').filter(Boolean);
+    return { name: parts[parts.length - 1] || key, ext: '' };
+  }
   const fullName = key.split('/').pop() || '';
-  if (isDirectory) return { name: fullName, ext: '' };
   
   const lastDot = fullName.lastIndexOf('.');
   if (lastDot === -1 || lastDot === 0) return { name: fullName, ext: '' };
@@ -112,6 +116,7 @@ export function FileExplorer({
   const [breadcrumbs, setBreadcrumbs] = useState<string[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<S3Object | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [bulkMode, setBulkMode] = useState(false);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState<Set<string>>(new Set());
@@ -580,6 +585,16 @@ export function FileExplorer({
     });
   };
 
+  const exitBulkMode = () => {
+    setBulkMode(false);
+    setSelectedKeys(new Set());
+  };
+
+  const toggleBulkMode = () => {
+    if (bulkMode) exitBulkMode();
+    else setBulkMode(true);
+  };
+
   const handleBulkDelete = async () => {
     const keys = Array.from(selectedKeys);
     if (keys.length === 0) return;
@@ -596,6 +611,7 @@ export function FileExplorer({
         if (results[i].status === 'fulfilled') removeObjectFromList(key);
       });
       setSelectedKeys(new Set());
+      setBulkMode(false);
       setBulkDeleteOpen(false);
 
       if (failed === 0) {
@@ -1392,36 +1408,50 @@ export function FileExplorer({
             <CardTitle className="text-sm">Files & Folders</CardTitle>
             {selectableFilesOnPage.length > 0 && (
               <div className="flex items-center gap-2">
-                <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
-                  <Checkbox
-                    checked={
-                      allPageFilesSelected
-                        ? true
-                        : somePageFilesSelected
-                          ? 'indeterminate'
-                          : false
-                    }
-                    onCheckedChange={() => {
-                      if (allPageFilesSelected) {
-                        setSelectedKeys(new Set());
-                      } else {
-                        setSelectedKeys(new Set(selectableFilesOnPage.map((o) => o.key)));
-                      }
-                    }}
-                    aria-label="Select all files on this page"
-                  />
-                  Select page
-                </label>
-                {selectedCount > 0 && (
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    className="cursor-pointer h-8"
-                    onClick={() => setBulkDeleteOpen(true)}
-                  >
-                    <Trash2 className="w-3.5 h-3.5 mr-1.5" />
-                    Delete {selectedCount}
-                  </Button>
+                <Button
+                  variant={bulkMode ? 'secondary' : 'outline'}
+                  size="sm"
+                  className="cursor-pointer h-8"
+                  onClick={toggleBulkMode}
+                  aria-pressed={bulkMode}
+                >
+                  <CheckSquare className="w-3.5 h-3.5 mr-1.5" />
+                  {bulkMode ? 'Done' : 'Select'}
+                </Button>
+                {bulkMode && (
+                  <>
+                    <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
+                      <Checkbox
+                        checked={
+                          allPageFilesSelected
+                            ? true
+                            : somePageFilesSelected
+                              ? 'indeterminate'
+                              : false
+                        }
+                        onCheckedChange={() => {
+                          if (allPageFilesSelected) {
+                            setSelectedKeys(new Set());
+                          } else {
+                            setSelectedKeys(new Set(selectableFilesOnPage.map((o) => o.key)));
+                          }
+                        }}
+                        aria-label="Select all files on this page"
+                      />
+                      Select page
+                    </label>
+                    {selectedCount > 0 && (
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        className="cursor-pointer h-8"
+                        onClick={() => setBulkDeleteOpen(true)}
+                      >
+                        <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                        Delete {selectedCount}
+                      </Button>
+                    )}
+                  </>
                 )}
               </div>
             )}
@@ -1444,7 +1474,7 @@ export function FileExplorer({
                     key={index}
                     className="flex items-center justify-between p-3 hover:bg-muted rounded-lg group transition duration-150"
                   >
-                    {!obj.isDirectory && (
+                    {bulkMode && !obj.isDirectory && (
                       <Checkbox
                         checked={selectedKeys.has(obj.key)}
                         onCheckedChange={(checked) =>
@@ -1776,7 +1806,7 @@ export function FileExplorer({
 
                 const gridCardBody = (
                   <>
-                    {!obj.isDirectory && (
+                    {bulkMode && !obj.isDirectory && (
                       <div
                         className="absolute top-2 left-2 z-10"
                         onClick={(e) => e.stopPropagation()}

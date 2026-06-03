@@ -50,3 +50,6 @@
 / 2026-06-02 on responsive mobile, clicking the 3 dots beside refresh, the storage connection is above, move it at the bottom, move view mode above putting the current directory and new folder buttons in the middle
 
 / 2026-06-02 when i leave the tab and return it will call s3-config and show "loading storage configuration" just do this sparingly and conserve background calls when leaving the page or returning to the page etc
+
+/ 2026-06-03 folder names not showing in mobile (S3 directory keys end with /)
+/ 2026-06-03 checkboxes toggle only when bulk mode on, by button
