@@ -27,8 +27,15 @@ export function computePageSize(
   const listAreaHeight = Math.max(240, viewport.height - PAGE_CHROME_PX);
 
   if (viewMode === 'list') {
+    let columns = 1;
+    if (viewport.width >= 1024) {
+      columns = 3;
+    } else if (viewport.width >= 768) {
+      columns = 2;
+    }
     const rows = Math.ceil(listAreaHeight / (LIST_ROW_PX + LIST_GAP_PX));
-    return clamp(rows + 1, MIN_PAGE_SIZE, MAX_PAGE_SIZE);
+    const nextSize = clamp(columns * (rows + 1), MIN_PAGE_SIZE, MAX_PAGE_SIZE);
+    return Math.ceil(nextSize / columns) * columns;
   }
 
   const columns = getGridColumns(containerWidth);

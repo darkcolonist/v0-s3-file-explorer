@@ -36,6 +36,7 @@ import {
   HardDrive,
   ChevronDown,
   CheckSquare,
+  Pencil,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
@@ -47,6 +48,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -129,6 +138,9 @@ export function FileExplorer({
   const [newFolderName, setNewFolderName] = useState('');
   const [showNewFolderInput, setShowNewFolderInput] = useState(false);
   const [viewMode, setViewMode] = useState<ExplorerViewMode>(() => getStoredViewMode());
+  const [renameTarget, setRenameTarget] = useState<S3Object | null>(null);
+  const [renameNewName, setRenameNewName] = useState('');
+  const [renaming, setRenaming] = useState(false);
 
   // Search & Pagination States
   const [searchQuery, setSearchQuery] = useState('');
@@ -554,15 +566,6 @@ export function FileExplorer({
 
       toast.success(`Uploaded ${file.name}`);
       addUploadedObject(file, key);
-
-      // Automatically copy to clipboard when upload completes successfully
-      try {
-        const downloadUrl = await s3Manager.getSignedDownloadUrl(key);
-        await navigator.clipboard.writeText(downloadUrl);
-        toast.success(`URL for ${file.name} copied to clipboard`);
-      } catch (copyErr) {
-        console.error('Failed to auto-copy URL:', copyErr);
-      }
     } catch (err: any) {
       console.error('Upload failed:', err);
       setUploads((prev) =>
@@ -602,6 +605,72 @@ export function FileExplorer({
       console.error(err);
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const startRename = (obj: S3Object) => {
+    setRenameTarget(obj);
+    const fileName = obj.key.split('/').pop() || '';
+    setRenameNewName(fileName);
+  };
+
+  const handleRename = async () => {
+    if (!renameTarget || !renameNewName.trim()) return;
+
+    const oldKey = renameTarget.key;
+    const parts = oldKey.split('/');
+    parts.pop(); // Remove old filename
+    const parentPath = parts.length > 0 ? parts.join('/') + '/' : '';
+    const newKey = parentPath + renameNewName.trim();
+
+    if (oldKey === newKey) {
+      setRenameTarget(null);
+      return;
+    }
+
+    const exists = objects.some((o) => o.key === newKey && !o.isDirectory);
+    if (exists) {
+      toast.error('A file with this name already exists');
+      return;
+    }
+
+    setRenaming(true);
+    try {
+      await s3Manager.renameObject(oldKey, newKey);
+      toast.success('File renamed successfully');
+
+      // Update state locally
+      setObjects((prev) =>
+        prev.map((o) => (o.key === oldKey ? { ...o, key: newKey } : o))
+      );
+
+      // Clear old key caches
+      setImageUrls((prev) => {
+        const next = { ...prev };
+        delete next[oldKey];
+        return next;
+      });
+      setFileUrls((prev) => {
+        const next = { ...prev };
+        delete next[oldKey];
+        return next;
+      });
+
+      // Update selectedKeys if the renamed file was selected
+      setSelectedKeys((prev) => {
+        if (!prev.has(oldKey)) return prev;
+        const next = new Set(prev);
+        next.delete(oldKey);
+        next.add(newKey);
+        return next;
+      });
+
+      setRenameTarget(null);
+    } catch (err) {
+      toast.error('Failed to rename file');
+      console.error(err);
+    } finally {
+      setRenaming(false);
     }
   };
 
@@ -821,6 +890,15 @@ export function FileExplorer({
     options?: { signedUrl?: string; includeUrl?: boolean }
   ) => (
     <div className="space-y-1 text-left max-w-[280px] pointer-events-auto min-w-0">
+      {isImageFile(obj.key) && imageUrls[obj.key] && (
+        <div className="w-full flex items-center justify-center aspect-video rounded-md overflow-hidden border border-border/80 bg-muted mb-2 shadow-sm">
+          <img
+            src={imageUrls[obj.key]}
+            alt={fileName}
+            className="max-w-full max-h-full object-contain"
+          />
+        </div>
+      )}
       <p className="font-medium text-sm leading-snug break-words">{fileName}</p>
       {fileExt && (
         <p className="text-[10px] font-mono uppercase text-muted-foreground">{fileExt}</p>
@@ -909,7 +987,7 @@ export function FileExplorer({
           type="button"
           variant="ghost"
           size="icon"
-          className={`${iconBtn} text-blue-600 hover:text-blue-500 dark:text-blue-400`}
+          className={iconBtn}
           disabled={isUploading}
           aria-label="Open in new tab"
           title="Open in new tab"
@@ -972,7 +1050,7 @@ export function FileExplorer({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        side={isMobile ? 'bottom' : 'end'}
+        side={isMobile ? 'bottom' : 'right'}
         className="w-64 max-w-[min(100vw-2rem,18rem)]"
       >
         <DropdownMenuItem
@@ -1012,11 +1090,19 @@ export function FileExplorer({
         </DropdownMenuItem>
         <DropdownMenuItem
           onClick={() => handleVisit(obj)}
-          className="cursor-pointer text-blue-500 focus:text-blue-600"
+          className="cursor-pointer"
           disabled={isUploading}
         >
           <ExternalLink className="w-4 h-4 mr-2" />
           Open in New Tab
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => startRename(obj)}
+          className="cursor-pointer"
+          disabled={isUploading}
+        >
+          <Pencil className="w-4 h-4 mr-2" />
+          Rename
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
@@ -1557,7 +1643,7 @@ export function FileExplorer({
           ) : objects.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground italic">No files or folders found here.</div>
           ) : viewMode === 'list' ? (
-            <div className="space-y-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
               {paginatedObjects.map((obj, index) => {
                 const isUploading = uploadingFiles.has(obj.key);
                 const { name: fileName, ext: fileExt } = getFileNameAndExtension(obj.key, obj.isDirectory);
@@ -1785,7 +1871,7 @@ export function FileExplorer({
                                 onClick={() => handleVisit(obj)}
                                 disabled={isUploading}
                               >
-                                <ExternalLink className="w-4 h-4 text-blue-500" />
+                                <ExternalLink className="w-4 h-4" />
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent side="bottom" className="max-w-xs">
@@ -1804,6 +1890,20 @@ export function FileExplorer({
                                 <span className="text-[10px] text-muted-foreground">hover to load url</span>
                               )}
                             </TooltipContent>
+                          </Tooltip>
+
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => startRename(obj)}
+                                disabled={isUploading}
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Rename File</TooltipContent>
                           </Tooltip>
 
                           {renderDeleteButton(obj, isUploading)}
@@ -1844,9 +1944,13 @@ export function FileExplorer({
                                 <Download className="w-4 h-4 mr-2" />
                                 Download
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleVisit(obj)} className="cursor-pointer text-blue-500 focus:text-blue-600">
+                              <DropdownMenuItem onClick={() => handleVisit(obj)} className="cursor-pointer">
                                 <ExternalLink className="w-4 h-4 mr-2" />
                                 Open in New Tab
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => startRename(obj)} className="cursor-pointer">
+                                <Pencil className="w-4 h-4 mr-2" />
+                                Rename
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               {renderDeleteButton(obj, isUploading, { variant: 'menu' })}
@@ -1877,8 +1981,8 @@ export function FileExplorer({
                   </div>
                 );
               })}
-              {hasMore && (
-                <div className="flex justify-center pt-2">
+              {hasMore ? (
+                <div className="col-span-full flex justify-center pt-2">
                   <Button
                     variant="outline"
                     size="sm"
@@ -1886,6 +1990,17 @@ export function FileExplorer({
                     className="cursor-pointer"
                   >
                     Load More ({sortedObjects.length - visibleCount} remaining)
+                  </Button>
+                </div>
+              ) : sortedObjects.length > 0 && (
+                <div className="col-span-full flex justify-center pt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled
+                    className="text-muted-foreground bg-muted/20 border-muted-foreground/20 cursor-not-allowed"
+                  >
+                    already at the end
                   </Button>
                 </div>
               )}
@@ -2051,7 +2166,7 @@ export function FileExplorer({
                   </Tooltip>
                 );
               })}
-              {hasMore && (
+              {hasMore ? (
                 <div className="col-span-full flex justify-center pt-2">
                   <Button
                     variant="outline"
@@ -2060,6 +2175,17 @@ export function FileExplorer({
                     className="cursor-pointer"
                   >
                     Load More ({sortedObjects.length - visibleCount} remaining)
+                  </Button>
+                </div>
+              ) : sortedObjects.length > 0 && (
+                <div className="col-span-full flex justify-center pt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled
+                    className="text-muted-foreground bg-muted/20 border-muted-foreground/20 cursor-not-allowed"
+                  >
+                    already at the end
                   </Button>
                 </div>
               )}
@@ -2071,7 +2197,7 @@ export function FileExplorer({
       {/* Floating Uploads Progress Pane */}
       {uploads.length > 0 && (
         <Card className="fixed bottom-4 right-4 left-4 sm:left-auto sm:w-96 z-40 max-h-[350px] flex flex-col bg-slate-900/95 border-slate-800 shadow-2xl backdrop-blur-xl animate-in slide-in-from-bottom-5 duration-300">
-          <CardHeader className="bg-slate-950/40 p-3 border-b border-slate-800 flex flex-row items-center justify-between space-y-0 shrink-0">
+          <CardHeader className="bg-slate-950/40 py-1.5 px-3 border-b border-slate-800 flex flex-row items-center justify-between space-y-0 shrink-0">
             <CardTitle className="text-xs font-bold flex items-center gap-2 text-white">
               <span>Uploads ({uploads.filter(u => u.status === 'uploading').length} active)</span>
             </CardTitle>
@@ -2217,6 +2343,54 @@ export function FileExplorer({
           </div>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Rename File Dialog */}
+      <Dialog
+        open={!!renameTarget}
+        onOpenChange={(open) => {
+          if (!open && !renaming) setRenameTarget(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Rename File</DialogTitle>
+            <DialogDescription>
+              Enter a new name for the file.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <Input
+              id="rename-input"
+              value={renameNewName}
+              onChange={(e) => setRenameNewName(e.target.value)}
+              className="col-span-3 h-9 text-sm"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && renameNewName.trim() && !renaming) {
+                  void handleRename();
+                }
+              }}
+              autoFocus
+            />
+          </div>
+          <DialogFooter className="flex gap-2 justify-end">
+            <Button
+              variant="outline"
+              onClick={() => setRenameTarget(null)}
+              disabled={renaming}
+              className="cursor-pointer"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleRename}
+              disabled={renaming || !renameNewName.trim() || !!(renameTarget && renameNewName.trim() === renameTarget.key.split('/').pop())}
+              className="cursor-pointer"
+            >
+              {renaming ? 'Renaming…' : 'Rename'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Media Player */}
       {selectedFile && previewUrl && (

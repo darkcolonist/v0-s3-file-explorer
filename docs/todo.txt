@@ -53,3 +53,15 @@
 / 2026-06-03 the grey arrow of the tooltip is somewhat tilted in a different angle but the tooltip display is fine
 / 2026-06-03 for the delete folders: only allow deleting empty folders; on confirm, check prefix with a single S3 list (MaxKeys=1) — succeed if truly empty, otherwise toast "Unable to delete — folder is not empty. Remove its contents first."
 / 2026-06-03 in the configure connection details page, add icons for import and export buttons. export will be greyed out if no connection details is selected yet. it can only be exported if it is an existing connection. for import, import will create a new connection and not overwrite existing stored data in db, if same name then maybe `connection` it will become `connection-00` `connection-01` and so on.
+
+/ 2026-06-10 remove the copy url to clipboard on upload but leave the copy button there 
+  * Removed the auto-copy URLPresigner fetch and clipboard write on upload completion; manual copy buttons remain fully functional.
+/ 2026-06-10 reduce height of lower right toast header ie., uploads (0 active) ... clear completed, it takes too much space
+  * Compacted CardHeader padding from p-3 to py-1.5 px-3 for the floating uploads card.
+/ 2026-06-10 ability to rename files
+  * Added S3 rename support (CopyObject + DeleteObject commands) and integrated a Dialog-based rename interface across list, grid, and mobile views.
+
+/ 2026-06-10 in desktop mode i think the detail list is too wasteful on space idk what do you suggest? 3 columns based on viewport? mobile is alright no need to update.
+  * Converted the List View container to a responsive grid layout (1 column on mobile, 2 on tablet, and 3 on desktop viewports) to save space.
+/ 2026-06-10 when i hover on items can you display a thumbnail if they are images? if it is not an image or it is a document, mp4, no need to show thumbnail
+  * Rendered a rounded aspect-ratio bounded image preview (fitted to box, maintaining aspect ratio) in the file details hover tooltip if the item is an image and its thumbnail signed URL is available.

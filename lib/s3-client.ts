@@ -4,6 +4,7 @@ import {
   DeleteObjectCommand,
   PutObjectCommand,
   GetObjectCommand,
+  CopyObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
@@ -216,6 +217,26 @@ export class S3Manager {
       return url;
     } catch (error) {
       console.error('Error getting signed upload URL:', error);
+      throw error;
+    }
+  }
+
+  async renameObject(oldKey: string, newKey: string): Promise<void> {
+    try {
+      // S3 requires the CopySource parameter to be of the form: /bucket-name/key-name
+      // It is critical to URL encode the key component so spaces/special chars don't break.
+      const copySource = `/${this.config.bucket}/${encodeURIComponent(oldKey).replace(/%2F/g, '/')}`;
+      const command = new CopyObjectCommand({
+        Bucket: this.config.bucket,
+        CopySource: copySource,
+        Key: newKey,
+      });
+      await this.client.send(command);
+      
+      // Delete old object
+      await this.deleteObject(oldKey);
+    } catch (error) {
+      console.error('Error renaming object:', error);
       throw error;
     }
   }
