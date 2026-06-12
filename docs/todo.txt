@@ -65,3 +65,5 @@
   * Converted the List View container to a responsive grid layout (1 column on mobile, 2 on tablet, and 3 on desktop viewports) to save space.
 / 2026-06-10 when i hover on items can you display a thumbnail if they are images? if it is not an image or it is a document, mp4, no need to show thumbnail
   * Rendered a rounded aspect-ratio bounded image preview (fitted to box, maintaining aspect ratio) in the file details hover tooltip if the item is an image and its thumbnail signed URL is available.
+/ 2026-06-12 i want the page to load immediately so i can upload files asap, the loading of files can wait
+  * Refactored file listing to run asynchronously, showing a slim loading bar instead of a full-card loading block. Added background merging of in-flight uploads.

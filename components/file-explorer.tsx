@@ -297,9 +297,18 @@ export function FileExplorer({
       options: { resetPagination?: boolean } = { resetPagination: true }
     ) => {
       setLoading(true);
+      const fetchStartTime = Date.now();
       try {
         const items = await s3Manager.listObjects(currentPath, activeSearch, !!activeSearch);
-        setObjects(items);
+        setObjects((prev) => {
+          const localNewUploads = prev.filter((obj) => {
+            const isSameFolder = obj.key.startsWith(currentPath);
+            const isRecent = obj.lastModified && (new Date(obj.lastModified).getTime() >= fetchStartTime - 5000);
+            const notInItems = !items.some((item) => item.key === obj.key);
+            return isSameFolder && isRecent && notInItems;
+          });
+          return [...items, ...localNewUploads];
+        });
         if (options.resetPagination) {
           setVisibleCount(getPageSizeForView(viewModeRef.current));
         }
@@ -1632,16 +1641,28 @@ export function FileExplorer({
             )}
           </div>
         </CardHeader>
-        <CardContent>
-          {loading || isConnectionSwitching ? (
+        <CardContent className="relative pt-6">
+          {loading && !isConnectionSwitching && (
+            <div className="absolute top-0 left-0 right-0 h-1 overflow-hidden bg-blue-500/10">
+              <div className="h-full bg-blue-600 animate-pulse w-full" />
+            </div>
+          )}
+          {isConnectionSwitching ? (
             <div className="flex flex-col items-center justify-center py-8 text-muted-foreground gap-2">
-              {isConnectionSwitching && <Spinner className="w-5 h-5 text-blue-500" />}
-              <span className={isConnectionSwitching ? 'animate-pulse' : undefined}>
-                {isConnectionSwitching ? 'Switching connection…' : 'Loading...'}
+              <Spinner className="w-5 h-5 text-blue-500" />
+              <span className="animate-pulse">
+                Switching connection…
               </span>
             </div>
           ) : objects.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground italic">No files or folders found here.</div>
+            loading ? (
+              <div className="flex flex-col items-center justify-center py-8 text-muted-foreground gap-2">
+                <Spinner className="w-5 h-5 text-blue-500" />
+                <span className="italic">Loading files...</span>
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground italic">No files or folders found here.</div>
+            )
           ) : viewMode === 'list' ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
               {paginatedObjects.map((obj, index) => {
