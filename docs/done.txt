@@ -1,0 +1,66 @@
+/ 2026-06-01 - Drag-and-drop upload, dark mode UI, and file explorer usability improvements:
+    / 2026-06-01 - Implemented drag-and-drop file upload capability anywhere on the page.
+    / 2026-06-01 - Added an upload progress bar and listed all active files during multi-file uploads.
+    / 2026-06-01 - Designed and integrated a comprehensive dark mode theme for the entire user interface.
+    / 2026-06-01 - Separated file extensions into distinct chips and removed extensions from displayed filenames.
+    / 2026-06-01 - Added upload date/time metadata visibility for each file in the system.
+    / 2026-06-01 - Positioned the "visit" (open URL in new tab) action button between the download and delete icons.
+    / 2026-06-01 - Rendered image thumbnails instead of standard file icons for uploaded image files.
+    / 2026-06-01 - Replaced default title tooltips on action buttons with an external popover-style tooltip library.
+    / 2026-06-01 - Enabled opening files in a new tab by clicking on the filename or file icon, maintaining default click behavior.
+    / 2026-06-01 - Created matching Dropbox-like SVG icons for the top-left logo and the browser favicon.
+    / 2026-06-01 - Fixed theme inheritance in toast notifications to ensure they follow light and dark mode rules.
+    / 2026-06-01 - Added a copy URL button to the completion state of the upload progress bar for auto-copying to the clipboard.
+    / 2026-06-01 - Added a copy URL action button on the right side of each file item.
+    / 2026-06-01 - Implemented human-readable relative times (e.g., minutes or hours ago) using date-fns, with full dates shown on hover.
+    / 2026-06-01 - Maximized layout width and optimized responsive margins to eliminate empty space on desktop and mobile screens.
+    / 2026-06-01 - Adjusted action button placement, grouping "copy URL" between "view" and "download", placing "delete" at the far right with a confirmation dialog.
+    / 2026-06-01 - Enabled preview capability for common image formats (such as PNG) upon clicking.
+    / 2026-06-01 - Fixed UI layout misalignment and spacing issues on mobile viewports.
+    / 2026-06-01 - Standardized left-side icons and thumbnail sizes to maintain consistent alignment of filenames.
+    / 2026-06-01 - Fixed the upload button styling to adhere to light and dark theme modes.
+    / 2026-06-01 - Refactored the top header layout to display correctly on mobile screens.
+    / 2026-06-01 - Introduced a grid/thumbnail view toggle as an alternative to the default list details view.
+    / 2026-06-01 - Consolidated folder creation, view toggle, and refresh buttons into a single utility button group next to upload.
+    / 2026-06-01 - Enhanced logout process to show a loading state and aggressively clear local auth caches upon failure.
+    / 2026-06-01 - Moved the current directory path display into the main toolbar next to the upload buttons.
+    / 2026-06-01 - Implemented S3-side text search and paginated list loading with a "Load More" button after the first 10 items.
+    / 2026-06-01 - Added dynamic catch-all routing and shareable short URLs under /f/{userId}/{key} for deep S3 paths.
+    / 2026-06-01 - Styled grid view cards to auto-fill columns and stretch thumbnails dynamically at wider viewport widths.
+    / 2026-06-01 - Hidden shareable links pending route testing, and added URL previews within copy/download/open-tab tooltips.
+    / 2026-06-01 - Applied proper light/dark theme variables to popover tooltips.
+    / 2026-06-01 - Resolved initializing freeze/hang on `/#` to `/` redirect by adding auto-redirect to login when authentication cache is corrupt.
+    / 2026-06-01 - Implemented viewport-aware initial item fetching to load enough files to fill larger desktop screens.
+    / 2026-06-01 - Configured automatic logout and refresh logic when an S3 configuration key or hash mismatch is encountered.
+    / 2026-06-01 - Improved authentication failure messages to be descriptive and developer-friendly without exposing sensitive data.
+    / 2026-06-01 - Fixed multi-file drag-drop uploads causing continuous page refreshes and reloads.
+    / 2026-06-01 - Replaced full-page reloads on file deletion with inline list/state updates to maintain scroll position.
+    / 2026-06-01 - Added support for uploading files directly from clipboard copy-paste operations where browser APIs allow.
+    / 2026-06-01 - Added action tooltips on hover and detailed 3-dot dropdown menus for grid items, optimized for mobile.
+/ 2026-06-02 - Multi-S3 connection support, bulk deletion, and toolbar reorganizations:
+    / 2026-06-02 - Fixed the visual flash of the "No S3 Configuration" screen during initial credentials loading.
+    / 2026-06-02 - Implemented bulk file deletion with select-all-page options and an "Are you sure you want to delete N files?" confirmation dialog.
+    / 2026-06-02 - Updated the grid tooltip to place action buttons above the details, with single-line truncation for file URLs.
+    / 2026-06-02 - Converted grid tooltip actions to a compact icon toolbar and persisted list/grid view preference in localStorage.
+    / 2026-06-02 - Added support for saving multiple S3 connections per user in Supabase, with automatic selection/persistence of the default connection.
+    / 2026-06-02 - Configured connection forms to auto-populate the bucket name based on the connection name.
+    / 2026-06-02 - Added auto-detection of S3 regions from the endpoint URL when configuring new connections.
+    / 2026-06-02 - Reordered the mobile toolbar dropdown to place connection selector at the bottom and view modes at the top.
+    / 2026-06-02 - Throttled and conserved background S3 configuration calls when switching browser tabs.
+/ 2026-06-03 - S3 folder support, connection import/export, and UX enhancements:
+    / 2026-06-03 - Fixed folder name display on mobile by correctly parsing S3 directory keys ending with a slash.
+    / 2026-06-03 - Configured selection checkboxes to only toggle when bulk selection mode is active.
+    / 2026-06-03 - Added the ability to delete S3 folders directly from the interface.
+    / 2026-06-03 - Added JSON import and export capability for connection settings to facilitate cross-user sharing.
+    / 2026-06-03 - Added an immediate loading indicator when switching between S3 connections.
+    / 2026-06-03 - Adjusted tooltip pointer arrow angles to align correctly with the popup boxes.
+    / 2026-06-03 - Restricted folder deletion to empty folders, pre-validating emptiness via a single-item S3 list check.
+    / 2026-06-03 - Added icons to import/export buttons in the connection manager, disabling export when no connection is active.
+/ 2026-06-10 - File renaming, responsive list layouts, and image preview tooltips:
+    / 2026-06-10 - Removed auto-copy of URLs to clipboard on upload, keeping manual copy buttons active.
+    / 2026-06-10 - Reduced the height of the floating upload card header for a more compact UI.
+    / 2026-06-10 - Added S3 rename support (CopyObject + DeleteObject) and built a Dialog-based rename interface.
+    / 2026-06-10 - Converted the List View container into a responsive multi-column grid layout (up to 3 columns on desktop).
+    / 2026-06-10 - Rendered an aspect-ratio-fitted preview thumbnail inside the file details tooltip for image files.
+/ 2026-06-12 - Asynchronous file listing and immediate upload availability:
+    / 2026-06-12 - Refactored file listings to load asynchronously and integrated in-flight upload merging.
