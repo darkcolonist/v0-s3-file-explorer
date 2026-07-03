@@ -1664,14 +1664,20 @@ export function FileExplorer({
               <div className="text-center py-8 text-muted-foreground italic">No files or folders found here.</div>
             )
           ) : viewMode === 'list' ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2.5">
               {paginatedObjects.map((obj, index) => {
                 const isUploading = uploadingFiles.has(obj.key);
                 const { name: fileName, ext: fileExt } = getFileNameAndExtension(obj.key, obj.isDirectory);
-                return (
+                
+                const listCardBody = (
                   <div
-                    key={index}
-                    className="flex items-center justify-between p-3 hover:bg-muted rounded-lg group transition duration-150"
+                    className="relative flex items-center justify-between p-2.5 hover:bg-muted/50 border rounded-lg group transition duration-150 cursor-pointer min-w-0"
+                    onClick={() =>
+                      obj.isDirectory ? navigateToFolder(obj.key) : handleVisit(obj)
+                    }
+                    onMouseEnter={() => {
+                      if (!obj.isDirectory) prefetchUrl(obj.key);
+                    }}
                   >
                     {bulkMode && !obj.isDirectory && (
                       <Checkbox
@@ -1682,324 +1688,101 @@ export function FileExplorer({
                         onClick={(e) => e.stopPropagation()}
                         onPointerDown={(e) => e.stopPropagation()}
                         aria-label={`Select ${fileName}`}
-                        className="mr-2 shrink-0"
+                        className="mr-2.5 shrink-0"
                       />
                     )}
-                    {(() => {
-                      const listPrimaryCell = (
-                        <div
-                          className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
-                          onClick={() =>
-                            obj.isDirectory ? navigateToFolder(obj.key) : handleVisit(obj)
-                          }
-                          onMouseEnter={() => {
-                            if (!obj.isDirectory) prefetchUrl(obj.key);
-                          }}
-                        >
-                          {(() => {
-                            if (obj.isDirectory) {
-                              return (
-                                <div className="w-8 h-8 flex items-center justify-center shrink-0">
-                                  <Folder className="w-5 h-5 text-blue-500" />
-                                </div>
-                              );
-                            }
-                            if (isImageFile(obj.key)) {
-                              const thumbUrl = imageUrls[obj.key];
-                              if (thumbUrl) {
-                                return (
-                                  <div className="w-8 h-8 rounded border border-muted bg-muted overflow-hidden shrink-0 flex items-center justify-center">
-                                    <img
-                                      src={thumbUrl}
-                                      alt={fileName}
-                                      className="w-full h-full object-cover"
-                                    />
-                                  </div>
-                                );
-                              }
-                              return (
-                                <div className="w-8 h-8 rounded border border-muted bg-muted/40 animate-pulse shrink-0 flex items-center justify-center">
-                                  <File className="w-4 h-4 text-slate-400" />
-                                </div>
-                              );
-                            }
+                    
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      {(() => {
+                        if (obj.isDirectory) {
+                          return (
+                            <div className="w-8 h-8 flex items-center justify-center shrink-0">
+                              <Folder className="w-5 h-5 text-blue-500" />
+                            </div>
+                          );
+                        }
+                        if (isImageFile(obj.key)) {
+                          const thumbUrl = imageUrls[obj.key];
+                          if (thumbUrl) {
                             return (
-                              <div className="w-8 h-8 flex items-center justify-center shrink-0">
-                                <File className="w-5 h-5 text-gray-500" />
+                              <div className="w-8 h-8 rounded border border-muted bg-muted overflow-hidden shrink-0 flex items-center justify-center">
+                                <img
+                                  src={thumbUrl}
+                                  alt={fileName}
+                                  className="w-full h-full object-cover"
+                                />
                               </div>
                             );
-                          })()}
-                          <div className="min-w-0 flex-1 flex flex-col justify-center">
-                            <div className="flex items-center gap-2 w-full min-w-0">
-                              <p className="text-sm font-medium truncate text-card-foreground min-w-0">
-                                {fileName}
-                              </p>
-                              {fileExt && (
-                                <Badge
-                                  variant="outline"
-                                  className="text-[9px] px-1 py-0 bg-muted/40 font-mono text-muted-foreground uppercase font-semibold border-muted/80 shrink-0"
-                                >
-                                  {fileExt}
-                                </Badge>
-                              )}
+                          }
+                          return (
+                            <div className="w-8 h-8 rounded border border-muted bg-muted/40 animate-pulse shrink-0 flex items-center justify-center">
+                              <File className="w-4 h-4 text-slate-400" />
                             </div>
-                            {!obj.isDirectory && (
-                              <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5 truncate w-full">
-                                <span className="shrink-0">{formatFileSize(obj.size)}</span>
-                                <span className="text-slate-400 dark:text-slate-600 shrink-0">•</span>
-                                <span className="truncate">
-                                  Uploaded{' '}
-                                  {formatDistanceToNow(new Date(obj.lastModified), {
-                                    addSuffix: true,
-                                  })}
-                                </span>
-                              </p>
-                            )}
+                          );
+                        }
+                        return (
+                          <div className="w-8 h-8 flex items-center justify-center shrink-0">
+                            <File className="w-5 h-5 text-gray-500" />
                           </div>
+                        );
+                      })()}
+                      
+                      <div className="min-w-0 flex-1 flex flex-col justify-center">
+                        <div className="flex items-center gap-1.5 w-full min-w-0">
+                          <p className="text-sm font-medium truncate text-card-foreground min-w-0" title={fileName}>
+                            {fileName}
+                          </p>
+                          {fileExt && (
+                            <Badge
+                              variant="outline"
+                              className="text-[9px] px-1 py-0 bg-muted/40 font-mono text-muted-foreground uppercase font-semibold border-muted/80 shrink-0"
+                            >
+                              {fileExt}
+                            </Badge>
+                          )}
                         </div>
-                      );
-
-                      if (isMobile) {
-                        return listPrimaryCell;
-                      }
-
-                      return (
-                        <Tooltip>
-                          <TooltipTrigger asChild>{listPrimaryCell}</TooltipTrigger>
-                          <TooltipContent
-                            side="top"
-                            sideOffset={6}
-                            className="max-w-xs p-3 pointer-events-auto"
-                          >
-                            {renderFileItemDetails(obj, fileName, fileExt, {
-                              signedUrl: obj.isDirectory ? undefined : fileUrls[obj.key],
-                            })}
-                          </TooltipContent>
-                        </Tooltip>
-                      );
-                    })()}
-                    {!obj.isDirectory && (
-                      <>
-                        {/* Desktop Actions */}
-                        <div
-                          className="hidden md:flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2 shrink-0"
-                          onMouseEnter={() => prefetchUrl(obj.key)}
-                        >
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => handlePreview(obj)}
-                                disabled={isUploading}
-                              >
-                                <Eye className="w-4 h-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Preview File</TooltipContent>
-                          </Tooltip>
-
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => handleCopyUrl(obj.key)}
-                                disabled={isUploading}
-                              >
-                                <Copy className="w-4 h-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom" className="max-w-xs">
-                              <p className="font-medium mb-1">Copy URL</p>
-                              {fileUrls[obj.key] ? (
-                                <a
-                                  href={fileUrls[obj.key]}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="text-[10px] text-blue-400 hover:text-blue-300 break-all leading-tight block"
-                                >
-                                  {fileUrls[obj.key].slice(0, 80)}…
-                                </a>
-                              ) : (
-                                <span className="text-[10px] text-muted-foreground">hover to load url</span>
-                              )}
-                            </TooltipContent>
-                          </Tooltip>
-
-                          {/* Shareable Link — hidden until route is confirmed working */}
-                          <span className="hidden">
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => handleCopyShareableUrl(obj.key)}
-                                  disabled={isUploading}
-                                >
-                                  <Share2 className="w-4 h-4" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>Copy Shareable Link</TooltipContent>
-                            </Tooltip>
-                          </span>
-
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={async () => {
-                                  try {
-                                    const url = await s3Manager.getSignedDownloadUrl(obj.key);
-                                    const a = document.createElement('a');
-                                    a.href = url;
-                                    a.download = obj.key.split('/').pop() || 'download';
-                                    a.click();
-                                    toast.success('Download started');
-                                  } catch (err) {
-                                    toast.error('Failed to download');
-                                  }
-                                }}
-                                disabled={isUploading}
-                              >
-                                <Download className="w-4 h-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom" className="max-w-xs">
-                              <p className="font-medium mb-1">Download File</p>
-                              {fileUrls[obj.key] ? (
-                                <a
-                                  href={fileUrls[obj.key]}
-                                  download={obj.key.split('/').pop()}
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="text-[10px] text-blue-400 hover:text-blue-300 break-all leading-tight block"
-                                >
-                                  {fileUrls[obj.key].slice(0, 80)}…
-                                </a>
-                              ) : (
-                                <span className="text-[10px] text-muted-foreground">hover to load url</span>
-                              )}
-                            </TooltipContent>
-                          </Tooltip>
-
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => handleVisit(obj)}
-                                disabled={isUploading}
-                              >
-                                <ExternalLink className="w-4 h-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom" className="max-w-xs">
-                              <p className="font-medium mb-1">Open in New Tab</p>
-                              {fileUrls[obj.key] ? (
-                                <a
-                                  href={fileUrls[obj.key]}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="text-[10px] text-blue-400 hover:text-blue-300 break-all leading-tight block"
-                                >
-                                  {fileUrls[obj.key].slice(0, 80)}…
-                                </a>
-                              ) : (
-                                <span className="text-[10px] text-muted-foreground">hover to load url</span>
-                              )}
-                            </TooltipContent>
-                          </Tooltip>
-
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => startRename(obj)}
-                                disabled={isUploading}
-                              >
-                                <Pencil className="w-4 h-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Rename File</TooltipContent>
-                          </Tooltip>
-
-                          {renderDeleteButton(obj, isUploading)}
-                        </div>
-
-                        {/* Mobile Actions Dropdown */}
-                        <div className="flex md:hidden ml-2 shrink-0">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 cursor-pointer">
-                                <MoreVertical className="w-4 h-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-40">
-                              <DropdownMenuItem onClick={() => handlePreview(obj)} className="cursor-pointer">
-                                <Eye className="w-4 h-4 mr-2" />
-                                Preview
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleCopyUrl(obj.key)} className="cursor-pointer">
-                                <Copy className="w-4 h-4 mr-2" />
-                                Copy URL
-                              </DropdownMenuItem>
-                              <DropdownMenuItem 
-                                onClick={async () => {
-                                  try {
-                                    const url = await s3Manager.getSignedDownloadUrl(obj.key);
-                                    const a = document.createElement('a');
-                                    a.href = url;
-                                    a.download = obj.key.split('/').pop() || 'download';
-                                    a.click();
-                                    toast.success('Download started');
-                                  } catch (err) {
-                                    toast.error('Failed to download');
-                                  }
-                                }} 
-                                className="cursor-pointer"
-                              >
-                                <Download className="w-4 h-4 mr-2" />
-                                Download
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleVisit(obj)} className="cursor-pointer">
-                                <ExternalLink className="w-4 h-4 mr-2" />
-                                Open in New Tab
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => startRename(obj)} className="cursor-pointer">
-                                <Pencil className="w-4 h-4 mr-2" />
-                                Rename
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              {renderDeleteButton(obj, isUploading, { variant: 'menu' })}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      </>
-                    )}
-                    {obj.isDirectory && canDeleteFolder(obj) && (
-                      <>
-                        <div className="hidden md:flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2 shrink-0">
-                          {renderDeleteButton(obj, isUploading)}
-                        </div>
-                        <div className="flex md:hidden ml-2 shrink-0">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 cursor-pointer">
-                                <MoreVertical className="w-4 h-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-40">
-                              {renderDeleteButton(obj, isUploading, { variant: 'menu' })}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      </>
-                    )}
+                        {!obj.isDirectory && (
+                          <p className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-0.5 truncate w-full">
+                            <span className="shrink-0">{formatFileSize(obj.size)}</span>
+                            <span className="text-slate-400 dark:text-slate-600 shrink-0">•</span>
+                            <span className="truncate">
+                              {formatDistanceToNow(new Date(obj.lastModified), {
+                                addSuffix: true,
+                              })}
+                            </span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Actions Menu */}
+                    <div 
+                      className="ml-2 shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+                      onClick={(e) => e.stopPropagation()}
+                      onPointerDown={(e) => e.stopPropagation()}
+                    >
+                      {renderGridItemActionsMenu(obj, isUploading, fileName, fileExt)}
+                    </div>
                   </div>
+                );
+
+                if (isMobile) {
+                  return <div key={index}>{listCardBody}</div>;
+                }
+
+                return (
+                  <Tooltip key={index}>
+                    <TooltipTrigger asChild>
+                      {listCardBody}
+                    </TooltipTrigger>
+                    <TooltipContent
+                      side="top"
+                      sideOffset={6}
+                      className="p-3 text-popover-foreground pointer-events-auto"
+                    >
+                      {renderGridTooltipContent(obj, fileName, fileExt, isUploading)}
+                    </TooltipContent>
+                  </Tooltip>
                 );
               })}
               {hasMore ? (

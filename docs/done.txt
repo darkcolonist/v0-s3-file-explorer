@@ -64,3 +64,6 @@
     / 2026-06-10 - Rendered an aspect-ratio-fitted preview thumbnail inside the file details tooltip for image files.
 / 2026-06-12 - Asynchronous file listing and immediate upload availability:
     / 2026-06-12 - Refactored file listings to load asynchronously and integrated in-flight upload merging.
+
+/ 2026-07-03 - Optimize list mode desktop view:
+    / 2026-07-03 - Refactored desktop list view to use a responsive grid layout with columns adapting to desktop size, showing core details while displaying full actions and S3 metadata on hover within a detailed tooltip, keeping the mobile list view unchanged.
