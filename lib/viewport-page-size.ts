@@ -20,7 +20,7 @@ export function getGridColumns(containerWidth: number): number {
 export type ViewportSize = { width: number; height: number };
 
 export function computePageSize(
-  viewMode: 'list' | 'grid',
+  viewMode: 'list' | 'grid' | 'masonry',
   viewport: ViewportSize
 ): number {
   const containerWidth = Math.max(320, viewport.width - HORIZONTAL_INSET_PX);

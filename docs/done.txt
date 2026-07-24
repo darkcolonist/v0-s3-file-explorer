@@ -67,3 +67,11 @@
 
 / 2026-07-03 - Optimize list mode desktop view:
     / 2026-07-03 - Refactored desktop list view to use a responsive grid layout with columns adapting to desktop size, showing core details while displaying full actions and S3 metadata on hover within a detailed tooltip, keeping the mobile list view unchanged.
+
+/ 2026-07-24 - Fullscreen Collage View and Infinite Scroll:
+    / 2026-07-24 - Implemented a borderless, fully fluid Fullscreen Collage (Masonry) view mode that adapts columns dynamically from 2 (mobile) to 12.
+    / 2026-07-24 - Added mobile-specific bottom-docked sticky controls bar containing Zoom In/Out, Scroll to Top, and Exit buttons.
+    / 2026-07-24 - Built double-tap mobile gesture (first tap reveals actions/copy menus, second tap opens/navigates the file/folder).
+    / 2026-07-24 - Added unified infinite scrolling using IntersectionObserver for list, grid, and collage view layouts.
+    / 2026-07-24 - Fixed mobile context dropdown menu auto-close behavior upon view mode selection.
+

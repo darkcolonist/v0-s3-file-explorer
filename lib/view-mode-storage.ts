@@ -1,4 +1,4 @@
-export type ExplorerViewMode = 'list' | 'grid';
+export type ExplorerViewMode = 'list' | 'grid' | 'masonry';
 
 const VIEW_MODE_STORAGE_KEY = 's3-file-explorer-view-mode';
 
@@ -6,7 +6,7 @@ export function getStoredViewMode(): ExplorerViewMode {
   if (typeof window === 'undefined') return 'list';
   try {
     const stored = localStorage.getItem(VIEW_MODE_STORAGE_KEY);
-    if (stored === 'list' || stored === 'grid') return stored;
+    if (stored === 'list' || stored === 'grid' || stored === 'masonry') return stored;
   } catch {
     // ignore quota / private mode
   }

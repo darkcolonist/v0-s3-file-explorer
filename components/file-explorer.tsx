@@ -30,6 +30,7 @@ import {
   MoreVertical,
   LayoutGrid,
   List,
+  Images,
   FolderPlus,
   FolderOpen,
   Share2,
@@ -37,6 +38,10 @@ import {
   ChevronDown,
   CheckSquare,
   Pencil,
+  X,
+  Plus,
+  Minus,
+  ArrowUp,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
@@ -138,6 +143,7 @@ export function FileExplorer({
   const [newFolderName, setNewFolderName] = useState('');
   const [showNewFolderInput, setShowNewFolderInput] = useState(false);
   const [viewMode, setViewMode] = useState<ExplorerViewMode>(() => getStoredViewMode());
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<S3Object | null>(null);
   const [renameNewName, setRenameNewName] = useState('');
   const [renaming, setRenaming] = useState(false);
@@ -150,7 +156,7 @@ export function FileExplorer({
   const [pageSize, setPageSize] = useState(MIN_PAGE_SIZE);
 
   const getPageSizeForView = useCallback(
-    (mode: 'list' | 'grid') => computePageSize(mode, getViewportSize()),
+    (mode: 'list' | 'grid' | 'masonry') => computePageSize(mode, getViewportSize()),
     []
   );
 
@@ -173,6 +179,36 @@ export function FileExplorer({
   s3SearchQueryRef.current = s3SearchQuery;
   const prevRootFolderRef = useRef(rootFolder);
 
+  const [columnCount, setColumnCount] = useState(2);
+  const [zoomOffset, setZoomOffset] = useState(0);
+  const [activeMobileCard, setActiveMobileCard] = useState<string | null>(null);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const collageScrollContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const scrollToTop = () => {
+    if (collageScrollContainerRef.current) {
+      collageScrollContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  useEffect(() => {
+    const syncColumnCount = () => {
+      if (typeof window === 'undefined') return;
+      const width = window.innerWidth;
+      let baseCols = 2;
+      if (width < 640) baseCols = 2;
+      else if (width < 768) baseCols = 3;
+      else if (width < 1024) baseCols = 4;
+      else if (width < 1280) baseCols = 5;
+      else baseCols = 6;
+
+      const finalCols = Math.max(1, Math.min(12, baseCols - zoomOffset));
+      setColumnCount(finalCols);
+    };
+    syncColumnCount();
+    window.addEventListener('resize', syncColumnCount);
+    return () => window.removeEventListener('resize', syncColumnCount);
+  }, [zoomOffset]);
   useEffect(() => {
     if (!connectionSwitching) {
       setLocalConnectionSwitching(false);
@@ -216,6 +252,18 @@ export function FileExplorer({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only apply URL on mount per connection
   }, []);
+
+  // Prevent background scrolling when in fullscreen collage mode
+  useEffect(() => {
+    if (viewMode === 'masonry') {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [viewMode]);
 
   // Synchronize URL path with currentPath when navigating
   useEffect(() => {
@@ -1154,6 +1202,32 @@ export function FileExplorer({
   const sortedObjects = getFilteredAndSortedObjects();
   const paginatedObjects = sortedObjects.slice(0, visibleCount);
   const hasMore = sortedObjects.length > visibleCount;
+
+  // Infinite scroll IntersectionObserver hook
+  useEffect(() => {
+    if (!hasMore || loading) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setVisibleCount((c) => c + pageSize);
+        }
+      },
+      { threshold: 0.1, rootMargin: '200px' }
+    );
+
+    const currentRef = loadMoreRef.current;
+    if (currentRef) {
+      observer.observe(currentRef);
+    }
+
+    return () => {
+      if (currentRef) {
+        observer.unobserve(currentRef);
+      }
+    };
+  }, [hasMore, loading, pageSize]);
+
   const selectableFilesOnPage = paginatedObjects.filter((o) => !o.isDirectory);
   const allPageFilesSelected =
     selectableFilesOnPage.length > 0 &&
@@ -1345,12 +1419,27 @@ export function FileExplorer({
                 variant={viewMode === 'grid' ? 'secondary' : 'ghost'}
                 size="sm"
                 onClick={() => setViewMode('grid')}
-                className="h-9 w-9 p-0 rounded-none cursor-pointer shrink-0"
+                className="h-9 w-9 p-0 rounded-none border-r border-border cursor-pointer shrink-0"
               >
                 <LayoutGrid className="w-4 h-4" />
               </Button>
             </TooltipTrigger>
             <TooltipContent>Grid View</TooltipContent>
+          </Tooltip>
+
+          {/* Collage View - Icon only */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant={viewMode === 'masonry' ? 'secondary' : 'ghost'}
+                size="sm"
+                onClick={() => setViewMode('masonry')}
+                className="h-9 w-9 p-0 rounded-none cursor-pointer shrink-0"
+              >
+                <Images className="w-4 h-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Collage View</TooltipContent>
           </Tooltip>
         </div>
 
@@ -1389,7 +1478,7 @@ export function FileExplorer({
           </Button>
 
           {/* More options - Dropdown menu (hamburger / 3-button style) */}
-          <DropdownMenu>
+          <DropdownMenu open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
             <DropdownMenuTrigger asChild>
               <Button
                 variant="ghost"
@@ -1406,24 +1495,42 @@ export function FileExplorer({
                 <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-2">
                   View mode
                 </span>
-                <div className="grid grid-cols-2 gap-1">
+                <div className="grid grid-cols-3 gap-1">
                   <Button
                     variant={viewMode === 'list' ? 'secondary' : 'ghost'}
                     size="sm"
-                    onClick={() => setViewMode('list')}
-                    className="h-8 text-xs cursor-pointer"
+                    onClick={() => {
+                      setViewMode('list');
+                      setMobileMenuOpen(false);
+                    }}
+                    className="h-8 text-xs cursor-pointer px-1"
                   >
-                    <List className="w-3.5 h-3.5 mr-1.5" />
+                    <List className="w-3.5 h-3.5 mr-1" />
                     List
                   </Button>
                   <Button
                     variant={viewMode === 'grid' ? 'secondary' : 'ghost'}
                     size="sm"
-                    onClick={() => setViewMode('grid')}
-                    className="h-8 text-xs cursor-pointer"
+                    onClick={() => {
+                      setViewMode('grid');
+                      setMobileMenuOpen(false);
+                    }}
+                    className="h-8 text-xs cursor-pointer px-1"
                   >
-                    <LayoutGrid className="w-3.5 h-3.5 mr-1.5" />
+                    <LayoutGrid className="w-3.5 h-3.5 mr-1" />
                     Grid
+                  </Button>
+                  <Button
+                    variant={viewMode === 'masonry' ? 'secondary' : 'ghost'}
+                    size="sm"
+                    onClick={() => {
+                      setViewMode('masonry');
+                      setMobileMenuOpen(false);
+                    }}
+                    className="h-8 text-xs cursor-pointer px-1"
+                  >
+                    <Images className="w-3.5 h-3.5 mr-1" />
+                    Collage
                   </Button>
                 </div>
               </div>
@@ -1785,32 +1892,9 @@ export function FileExplorer({
                   </Tooltip>
                 );
               })}
-              {hasMore ? (
-                <div className="col-span-full flex justify-center pt-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setVisibleCount((c) => c + pageSize)}
-                    className="cursor-pointer"
-                  >
-                    Load More ({sortedObjects.length - visibleCount} remaining)
-                  </Button>
-                </div>
-              ) : sortedObjects.length > 0 && (
-                <div className="col-span-full flex justify-center pt-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled
-                    className="text-muted-foreground bg-muted/20 border-muted-foreground/20 cursor-not-allowed"
-                  >
-                    already at the end
-                  </Button>
-                </div>
-              )}
             </div>
-          ) : (
-          <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
+          ) : viewMode === 'grid' ? (
+            <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
               {paginatedObjects.map((obj, index) => {
                 const isUploading = uploadingFiles.has(obj.key);
                 const { name: fileName, ext: fileExt } = getFileNameAndExtension(obj.key, obj.isDirectory);
@@ -1970,28 +2054,37 @@ export function FileExplorer({
                   </Tooltip>
                 );
               })}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-3">
+              <Images className="w-8 h-8 text-blue-500 animate-pulse" />
+              <div className="text-center">
+                <p className="font-semibold text-sm">Fullscreen Collage Mode Active</p>
+                <p className="text-xs text-muted-foreground mt-1">Hiding normal explorer controls to focus on the gallery.</p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2 cursor-pointer"
+                onClick={() => setViewMode('grid')}
+              >
+                Exit Collage
+              </Button>
+            </div>
+          )}
+
+          {/* Unified Infinite Scroll Sentinel for Normal Layouts */}
+          {viewMode !== 'masonry' && sortedObjects.length > 0 && (
+            <div ref={loadMoreRef} className="flex justify-center pt-6 pb-2 w-full">
               {hasMore ? (
-                <div className="col-span-full flex justify-center pt-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setVisibleCount((c) => c + pageSize)}
-                    className="cursor-pointer"
-                  >
-                    Load More ({sortedObjects.length - visibleCount} remaining)
-                  </Button>
+                <div className="flex items-center gap-2 text-muted-foreground text-sm py-2">
+                  <Spinner className="w-4 h-4 text-blue-500 shrink-0" />
+                  <span>Loading more...</span>
                 </div>
-              ) : sortedObjects.length > 0 && (
-                <div className="col-span-full flex justify-center pt-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled
-                    className="text-muted-foreground bg-muted/20 border-muted-foreground/20 cursor-not-allowed"
-                  >
-                    already at the end
-                  </Button>
-                </div>
+              ) : (
+                <span className="text-xs text-muted-foreground bg-muted/30 px-3 py-1 rounded-full border">
+                  Showed all {sortedObjects.length} items
+                </span>
               )}
             </div>
           )}
@@ -2208,6 +2301,279 @@ export function FileExplorer({
           }}
           onDownload={handleDownload}
         />
+      )}
+
+      {/* Fullscreen Collage Overlay */}
+      {viewMode === 'masonry' && (
+        <>
+          {/* Floating Controls Bar (Zoom Out, Zoom In, Exit) - Placed outside scroll container to keep it strictly fixed to viewport */}
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 sm:bottom-auto sm:left-auto sm:translate-x-0 sm:top-6 sm:right-6 z-[60] flex items-center gap-2 bg-slate-950/85 border border-border/65 sm:bg-transparent sm:border-none p-2 sm:p-0 rounded-full shadow-2xl sm:shadow-none backdrop-blur-md sm:backdrop-blur-none">
+            {/* Scroll to Top Button (Mobile only, placed to the left of [-]) */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                scrollToTop();
+              }}
+              className="flex sm:hidden items-center justify-center bg-primary text-primary-foreground shadow-lg rounded-full w-10 h-10 border border-primary-foreground/10 cursor-pointer hover:bg-primary/90 select-none active:scale-95 transition-all duration-200"
+              title="Scroll to Top"
+            >
+              <ArrowUp className="w-5 h-5" />
+            </button>
+
+            {/* Zoom Out Button (Smaller thumbnails -> More columns) */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setZoomOffset((prev) => Math.max(-3, prev - 1));
+              }}
+              disabled={zoomOffset <= -3}
+              className="flex items-center justify-center bg-primary text-primary-foreground shadow-lg rounded-full w-10 h-10 sm:w-11 sm:h-11 border border-primary-foreground/10 cursor-pointer hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed select-none active:scale-95 transition-all duration-200"
+              title="Zoom Out (Smaller Thumbnails)"
+            >
+              <Minus className="w-5 h-5" />
+            </button>
+
+            {/* Zoom In Button (Larger thumbnails -> Fewer columns) */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setZoomOffset((prev) => Math.min(3, prev + 1));
+              }}
+              disabled={zoomOffset >= 3}
+              className="flex items-center justify-center bg-primary text-primary-foreground shadow-lg rounded-full w-10 h-10 sm:w-11 sm:h-11 border border-primary-foreground/10 cursor-pointer hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed select-none active:scale-95 transition-all duration-200"
+              title="Zoom In (Larger Thumbnails)"
+            >
+              <Plus className="w-5 h-5" />
+            </button>
+
+            {/* Unified Hover Exit Button */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setViewMode('grid');
+              }}
+              className="flex items-center justify-start bg-primary text-primary-foreground shadow-lg rounded-full h-10 px-2.5 sm:h-11 sm:px-3 border border-primary-foreground/10 cursor-pointer overflow-hidden transition-all duration-300 ease-in-out w-10 hover:w-10 sm:hover:w-48 group select-none active:scale-95 touch-manipulation"
+              aria-label="Exit Collage View"
+              title="Exit Collage"
+            >
+              <X className="w-5 h-5 shrink-0" />
+              <span className="ml-3 text-xs font-bold uppercase tracking-wider whitespace-nowrap opacity-0 sm:group-hover:opacity-100 transition-opacity duration-200 hidden sm:inline">
+                Exit Collage
+              </span>
+            </button>
+          </div>
+
+          <div 
+            ref={collageScrollContainerRef}
+            className="fixed inset-0 z-50 bg-background overflow-y-auto p-4 pb-24 sm:p-6 sm:pb-6 animate-in fade-in duration-300"
+            onClick={() => setActiveMobileCard(null)}
+          >
+            <div className="w-full">
+            <div className="flex gap-4 w-full">
+              {(() => {
+                const columns: S3Object[][] = Array.from({ length: columnCount }, () => []);
+                paginatedObjects.forEach((obj, idx) => {
+                  columns[idx % columnCount].push(obj);
+                });
+
+                return columns.map((col, colIdx) => (
+                  <div key={colIdx} className="flex-1 flex flex-col gap-4 min-w-0">
+                    {col.map((obj) => {
+                      const isUploading = uploadingFiles.has(obj.key);
+                      const { name: fileName, ext: fileExt } = getFileNameAndExtension(obj.key, obj.isDirectory);
+                      const isImg = isImageFile(obj.key);
+                      const thumbUrl = imageUrls[obj.key];
+
+                      const masonryCardBody = (
+                        <div
+                          className="relative group flex flex-col rounded-xl overflow-hidden border bg-card hover:shadow-lg transition-all duration-300 cursor-pointer min-w-0"
+                          onClick={(e) => {
+                            if (isMobile) {
+                              if (activeMobileCard === obj.key) {
+                                if (obj.isDirectory) {
+                                  navigateToFolder(obj.key);
+                                } else {
+                                  handleVisit(obj);
+                                }
+                              } else {
+                                e.stopPropagation();
+                                setActiveMobileCard(obj.key);
+                              }
+                            } else {
+                              if (obj.isDirectory) {
+                                navigateToFolder(obj.key);
+                              } else {
+                                handleVisit(obj);
+                              }
+                            }
+                          }}
+                          onMouseEnter={() => {
+                            if (!obj.isDirectory) prefetchUrl(obj.key);
+                          }}
+                        >
+                          {bulkMode && !obj.isDirectory && (
+                            <div
+                              className="absolute top-2.5 left-2.5 z-10"
+                              onClick={(e) => e.stopPropagation()}
+                              onPointerDown={(e) => e.stopPropagation()}
+                            >
+                              <Checkbox
+                                checked={selectedKeys.has(obj.key)}
+                                onCheckedChange={(checked) =>
+                                  toggleFileSelection(obj.key, checked === true)
+                                }
+                                aria-label={`Select ${fileName}`}
+                                className="bg-card/90 border shadow-sm"
+                              />
+                            </div>
+                          )}
+
+                          {!obj.isDirectory && (
+                            <div
+                              className={`absolute top-2.5 right-2.5 z-10 flex items-center gap-1 rounded-lg border border-border/80 bg-card/95 shadow-sm p-0.5 transition-opacity ${
+                                activeMobileCard === obj.key ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none md:opacity-0 md:group-hover:opacity-100 md:pointer-events-auto'
+                              }`}
+                              onClick={(e) => e.stopPropagation()}
+                              onPointerDown={(e) => e.stopPropagation()}
+                            >
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 p-0 cursor-pointer hover:bg-muted"
+                                aria-label={`Copy URL for ${fileName}`}
+                                title="Copy URL"
+                                disabled={isUploading}
+                                onClick={() => handleCopyUrl(obj.key)}
+                              >
+                                <Copy className="w-3.5 h-3.5" />
+                              </Button>
+                              {renderGridItemActionsMenu(obj, isUploading, fileName, fileExt)}
+                            </div>
+                          )}
+
+                          {obj.isDirectory && canDeleteFolder(obj) && (
+                            <div
+                              className={`absolute top-2.5 right-2.5 z-10 transition-opacity ${
+                                activeMobileCard === obj.key ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none md:opacity-0 md:group-hover:opacity-100 md:pointer-events-auto'
+                              }`}
+                              onClick={(e) => e.stopPropagation()}
+                              onPointerDown={(e) => e.stopPropagation()}
+                            >
+                              {renderDeleteButton(obj, isUploading, {
+                                className: 'h-7 w-7 p-0 cursor-pointer hover:bg-muted',
+                              })}
+                            </div>
+                          )}
+
+                          {obj.isDirectory ? (
+                            <div className="p-6 flex flex-col items-center justify-center bg-blue-500/5 hover:bg-blue-500/10 transition-colors border-b">
+                              <Folder className="w-12 h-12 text-blue-500 mb-2" />
+                              <span className="text-xs font-semibold text-center truncate w-full text-card-foreground">
+                                {fileName}
+                              </span>
+                            </div>
+                          ) : isImg ? (
+                            <div className="relative w-full overflow-hidden bg-muted flex items-center justify-center min-h-[100px]">
+                              {thumbUrl ? (
+                                <img
+                                  src={thumbUrl}
+                                  alt={fileName}
+                                  className="w-full h-auto object-cover max-h-[450px]"
+                                />
+                              ) : (
+                                <div className="p-8 flex items-center justify-center w-full min-h-[150px] animate-pulse">
+                                  <File className="w-8 h-8 text-slate-400" />
+                                </div>
+                              )}
+                              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-3 pt-8 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <p className="text-xs font-bold truncate text-white max-w-[80%]">
+                                    {fileName}
+                                  </p>
+                                  {fileExt && (
+                                    <Badge
+                                      variant="outline"
+                                      className="text-[8px] px-1 py-0 bg-white/25 border-white/30 text-white font-mono uppercase font-semibold shrink-0"
+                                    >
+                                      {fileExt}
+                                    </Badge>
+                                  )}
+                                </div>
+                                <p className="text-[9px] text-gray-300 mt-0.5">
+                                  {formatFileSize(obj.size)}
+                                </p>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="p-6 flex flex-col items-center justify-center bg-muted/20 hover:bg-muted/40 transition-colors border-b">
+                              <File className="w-12 h-12 text-gray-400 mb-2" />
+                              <div className="flex items-center justify-center gap-1 min-w-0 w-full">
+                                <span className="text-xs font-semibold truncate text-center text-card-foreground max-w-[80%]">
+                                  {fileName}
+                                </span>
+                                {fileExt && (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[8px] px-0.5 py-0 bg-muted/40 font-mono text-muted-foreground uppercase font-semibold border-muted/80 scale-90 shrink-0"
+                                  >
+                                    {fileExt}
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="text-[9px] text-muted-foreground mt-1">
+                                {formatFileSize(obj.size)}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      );
+
+                      if (isMobile) {
+                        return (
+                          <div key={obj.key}>
+                            {masonryCardBody}
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <Tooltip key={obj.key}>
+                          <TooltipTrigger asChild>
+                            {masonryCardBody}
+                          </TooltipTrigger>
+                          <TooltipContent
+                            side="top"
+                            sideOffset={8}
+                            className="p-3 text-popover-foreground pointer-events-auto"
+                          >
+                            {renderGridTooltipContent(obj, fileName, fileExt, isUploading)}
+                          </TooltipContent>
+                        </Tooltip>
+                      );
+                    })}
+                  </div>
+                ));
+              })()}
+            </div>
+
+            {/* Unified Infinite Scroll Sentinel inside overlay */}
+            {sortedObjects.length > 0 && (
+              <div ref={loadMoreRef} className="flex justify-center pt-6 pb-2 w-full">
+                {hasMore ? (
+                  <div className="flex items-center gap-2 text-muted-foreground text-sm py-2">
+                    <Spinner className="w-4 h-4 text-blue-500 shrink-0" />
+                    <span>Loading more...</span>
+                  </div>
+                ) : (
+                  <span className="text-xs text-muted-foreground bg-muted/30 px-3 py-1 rounded-full border">
+                    Showed all {sortedObjects.length} items
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+        </>
       )}
     </div>
   );
