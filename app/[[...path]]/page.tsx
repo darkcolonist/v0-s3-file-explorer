@@ -15,6 +15,9 @@ import {
   getStoredConnectionId,
   storeConnectionId,
   clearStoredConnectionId,
+  getStoredConnectionsSummary,
+  storeConnectionsSummary,
+  clearStoredConnectionsSummary,
 } from '@/lib/s3-connection-storage';
 import { S3Manager } from '@/lib/s3-client';
 import { AuthView } from '@/components/auth-view';
@@ -41,7 +44,7 @@ function s3ConfigFingerprint(
   row: { region: string; bucket: string; provider: string; id?: string },
   credentials: Pick<
     S3Config,
-    'accessKeyId' | 'secretAccessKey' | 'endpoint' | 'rootFolder'
+    'accessKeyId' | 'secretAccessKey' | 'endpoint' | 'rootFolder' | 'publicAccess' | 'customCdnUrl'
   >
 ): string {
   return JSON.stringify({
@@ -53,6 +56,8 @@ function s3ConfigFingerprint(
     secretAccessKey: credentials.secretAccessKey,
     endpoint: credentials.endpoint ?? '',
     rootFolder: credentials.rootFolder ?? '',
+    publicAccess: credentials.publicAccess ?? false,
+    customCdnUrl: credentials.customCdnUrl ?? '',
   });
 }
 
@@ -63,7 +68,7 @@ function buildS3ManagerFromConfig(config: {
   bucket: string;
   credentials: Pick<
     S3Config,
-    'accessKeyId' | 'secretAccessKey' | 'endpoint' | 'rootFolder'
+    'accessKeyId' | 'secretAccessKey' | 'endpoint' | 'rootFolder' | 'publicAccess' | 'customCdnUrl'
   >;
 }): S3Manager {
   const managerConfig: S3Config = {
@@ -74,6 +79,8 @@ function buildS3ManagerFromConfig(config: {
     endpoint: config.credentials.endpoint,
     forcePathStyle: config.provider === 'digitalocean',
     rootFolder: config.credentials.rootFolder,
+    publicAccess: config.credentials.publicAccess,
+    customCdnUrl: config.credentials.customCdnUrl,
   };
   return new S3Manager(managerConfig);
 }
@@ -216,6 +223,7 @@ export default function Home() {
 
           const configs = listResult.configs;
           setConnections(configs);
+          storeConnectionsSummary(userId, configs);
 
           if (!configs.length) {
             setActiveConnectionId(null);
@@ -309,8 +317,20 @@ export default function Home() {
         if (session?.user) {
           setUser(session.user);
           hadAuthenticatedUserRef.current = true;
+          const cachedConnections = getStoredConnectionsSummary(session.user.id);
+          const cachedActiveId = getStoredConnectionId(session.user.id);
+          let hasCache = false;
+          if (cachedConnections && cachedConnections.length > 0) {
+            setConnections(cachedConnections);
+            hasCache = true;
+            if (cachedActiveId && cachedConnections.some((c: any) => c.id === cachedActiveId)) {
+              setActiveConnectionId(cachedActiveId);
+            } else {
+              setActiveConnectionId(cachedConnections[0].id);
+            }
+          }
           if (!s3ConfigLoadedRef.current) {
-            await loadS3ConfigRef.current(session.user.id, { showLoading: true });
+            await loadS3ConfigRef.current(session.user.id, { showLoading: !hasCache });
           }
         }
       } catch (err) {

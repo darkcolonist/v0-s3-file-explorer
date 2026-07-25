@@ -73,5 +73,14 @@
     / 2026-07-24 - Added mobile-specific bottom-docked sticky controls bar containing Zoom In/Out, Scroll to Top, and Exit buttons.
     / 2026-07-24 - Built double-tap mobile gesture (first tap reveals actions/copy menus, second tap opens/navigates the file/folder).
     / 2026-07-24 - Added unified infinite scrolling using IntersectionObserver for list, grid, and collage view layouts.
-    / 2026-07-24 - Fixed mobile context dropdown menu auto-close behavior upon view mode selection.
+
+/ 2026-07-26 - Mobile Reload Persistence, Collage View Infinite Scroll Fix & Image Optimization:
+    / 2026-07-26 - Optimized initial session hydration with local storage metadata caching so mobile tab wakes/reloads immediately display the UI shell without getting stuck on "Initializing...".
+    / 2026-07-26 - Fixed infinite scroll in Fullscreen Collage Mode by adding `viewMode` to IntersectionObserver dependencies and dynamic `root: collageScrollContainerRef.current` targeting for seamless pagination without requiring page reloads.
+/ 2026-07-26 - Permanent Non-Expiring Links & Public Upload Support:
+    / 2026-07-26 - Added `public-read` ACL support on S3 uploads when enabled in storage configuration.
+    / 2026-07-26 - Integrated permanent non-expiring public URL generation and optional custom CDN domain base URL setting.
+    / 2026-07-26 - Added "Copy Permanent Link" option across action menus, tooltips, and file item context menus.
+
+
 

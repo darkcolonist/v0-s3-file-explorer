@@ -31,6 +31,8 @@ function configToResponse(data: {
       secretAccessKey: credentials.secretAccessKey,
       endpoint: credentials.endpoint,
       rootFolder: credentials.rootFolder,
+      publicAccess: Boolean(credentials.publicAccess),
+      customCdnUrl: credentials.customCdnUrl,
     },
   };
 }
@@ -135,6 +137,8 @@ function parseSaveBody(body: unknown): S3ConfigSavePayload | null {
       secretAccessKey: creds.secretAccessKey,
       endpoint: typeof creds.endpoint === 'string' ? creds.endpoint : undefined,
       rootFolder: typeof creds.rootFolder === 'string' ? creds.rootFolder : undefined,
+      publicAccess: Boolean(creds.publicAccess),
+      customCdnUrl: typeof creds.customCdnUrl === 'string' ? creds.customCdnUrl : undefined,
     },
   };
 }
@@ -183,6 +187,8 @@ export async function POST(request: Request) {
       ...(payload.credentials.rootFolder
         ? { rootFolder: payload.credentials.rootFolder }
         : {}),
+      ...(payload.credentials.publicAccess ? { publicAccess: true } : {}),
+      ...(payload.credentials.customCdnUrl ? { customCdnUrl: payload.credentials.customCdnUrl } : {}),
     });
 
     const row = {

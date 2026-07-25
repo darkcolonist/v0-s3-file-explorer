@@ -42,6 +42,7 @@ import {
   Plus,
   Minus,
   ArrowUp,
+  Link,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
@@ -796,7 +797,7 @@ export function FileExplorer({
   const handlePreview = async (file: S3Object) => {
     setSelectedFile(file);
     try {
-      const url = await s3Manager.getSignedDownloadUrl(file.key);
+      const url = fileUrls[file.key] || (await s3Manager.getSignedDownloadUrl(file.key));
       setPreviewUrl(url);
     } catch (err) {
       toast.error('Failed to load preview');
@@ -807,7 +808,7 @@ export function FileExplorer({
   const handleDownload = async () => {
     if (!selectedFile) return;
     try {
-      const url = await s3Manager.getSignedDownloadUrl(selectedFile.key);
+      const url = fileUrls[selectedFile.key] || (await s3Manager.getSignedDownloadUrl(selectedFile.key));
       const a = document.createElement('a');
       a.href = url;
       a.download = selectedFile.key.split('/').pop() || 'download';
@@ -821,7 +822,7 @@ export function FileExplorer({
 
   const handleVisit = async (file: S3Object) => {
     try {
-      const url = await s3Manager.getSignedDownloadUrl(file.key);
+      const url = fileUrls[file.key] || (await s3Manager.getSignedDownloadUrl(file.key));
       window.open(url, '_blank', 'noopener,noreferrer');
     } catch (err) {
       toast.error('Failed to open file');
@@ -831,11 +832,28 @@ export function FileExplorer({
 
   const handleCopyUrl = async (key: string) => {
     try {
-      const url = await s3Manager.getSignedDownloadUrl(key);
+      const url = s3Manager.config.publicAccess
+        ? s3Manager.getPublicUrl(key)
+        : await s3Manager.getSignedDownloadUrl(key);
       await navigator.clipboard.writeText(url);
-      toast.success('URL copied to clipboard');
+      toast.success(
+        s3Manager.config.publicAccess
+          ? 'Permanent link copied to clipboard'
+          : 'Presigned URL copied to clipboard'
+      );
     } catch (err) {
       toast.error('Failed to copy URL');
+      console.error(err);
+    }
+  };
+
+  const handleCopyPermanentUrl = async (key: string) => {
+    try {
+      const url = s3Manager.getPublicUrl(key);
+      await navigator.clipboard.writeText(url);
+      toast.success('Permanent link copied to clipboard');
+    } catch (err) {
+      toast.error('Failed to copy link');
       console.error(err);
     }
   };
@@ -1127,6 +1145,14 @@ export function FileExplorer({
           Copy URL
         </DropdownMenuItem>
         <DropdownMenuItem
+          onClick={() => handleCopyPermanentUrl(obj.key)}
+          className="cursor-pointer"
+          disabled={isUploading}
+        >
+          <Link className="w-4 h-4 mr-2" />
+          Copy Permanent Link
+        </DropdownMenuItem>
+        <DropdownMenuItem
           onClick={async () => {
             try {
               const url = await s3Manager.getSignedDownloadUrl(obj.key);
@@ -1207,26 +1233,35 @@ export function FileExplorer({
   useEffect(() => {
     if (!hasMore || loading) return;
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting) {
-          setVisibleCount((c) => c + pageSize);
-        }
-      },
-      { threshold: 0.1, rootMargin: '200px' }
-    );
+    let observer: IntersectionObserver | null = null;
+    let timerId: NodeJS.Timeout | null = null;
 
-    const currentRef = loadMoreRef.current;
-    if (currentRef) {
+    // Use small timeout to allow React to flush DOM layout changes when switching viewMode
+    timerId = setTimeout(() => {
+      const currentRef = loadMoreRef.current;
+      if (!currentRef) return;
+
+      const rootTarget = viewMode === 'masonry' ? collageScrollContainerRef.current : null;
+
+      observer = new IntersectionObserver(
+        (entries) => {
+          if (entries[0] && entries[0].isIntersecting) {
+            setVisibleCount((c) => c + pageSize);
+          }
+        },
+        { root: rootTarget, threshold: 0.01, rootMargin: '300px' }
+      );
+
       observer.observe(currentRef);
-    }
+    }, 50);
 
     return () => {
-      if (currentRef) {
-        observer.unobserve(currentRef);
+      if (timerId) clearTimeout(timerId);
+      if (observer) {
+        observer.disconnect();
       }
     };
-  }, [hasMore, loading, pageSize]);
+  }, [hasMore, loading, pageSize, viewMode, paginatedObjects.length]);
 
   const selectableFilesOnPage = paginatedObjects.filter((o) => !o.isDirectory);
   const allPageFilesSelected =
@@ -1816,6 +1851,8 @@ export function FileExplorer({
                                 <img
                                   src={thumbUrl}
                                   alt={fileName}
+                                  loading="lazy"
+                                  decoding="async"
                                   className="w-full h-full object-cover"
                                 />
                               </div>

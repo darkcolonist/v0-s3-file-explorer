@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { FileDown, FileUp } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { CREDENTIAL_DECRYPT_TOAST, ENCRYPTION_KEY_SERVER_TOAST } from '@/lib/encryption-messages';
@@ -87,6 +88,8 @@ export function S3ConfigModal({
   const formSessionRef = useRef(0);
   const bucketAutoSyncRef = useRef(true);
   const regionAutoSyncRef = useRef(true);
+  const [publicAccess, setPublicAccess] = useState(false);
+  const [customCdnUrl, setCustomCdnUrl] = useState('');
 
   const resetForm = useCallback(() => {
     formSessionRef.current += 1;
@@ -101,6 +104,8 @@ export function S3ConfigModal({
     setSecretAccessKey('');
     setEndpoint('');
     setRootFolder('');
+    setPublicAccess(false);
+    setCustomCdnUrl('');
     setShowFolderBrowser(false);
     setShowSecretKey(false);
     setBrowserCurrentPath('');
@@ -119,6 +124,8 @@ export function S3ConfigModal({
       secretAccessKey?: string;
       endpoint?: string;
       rootFolder?: string;
+      publicAccess?: boolean;
+      customCdnUrl?: string;
     };
   }) => {
     bucketAutoSyncRef.current = false;
@@ -132,6 +139,8 @@ export function S3ConfigModal({
     setSecretAccessKey(config.credentials.secretAccessKey || '');
     setEndpoint(config.credentials.endpoint || '');
     setRootFolder(config.credentials.rootFolder || '');
+    setPublicAccess(Boolean(config.credentials.publicAccess));
+    setCustomCdnUrl(config.credentials.customCdnUrl || '');
     setShowFolderBrowser(false);
     setBrowserCurrentPath('');
     setBrowserFolders([]);
@@ -150,8 +159,11 @@ export function S3ConfigModal({
       bucket,
       endpoint: provider === 'digitalocean' ? endpoint : undefined,
       forcePathStyle: provider === 'digitalocean',
+      rootFolder,
+      publicAccess,
+      customCdnUrl,
     });
-  }, [accessKeyId, secretAccessKey, region, bucket, endpoint, provider]);
+  }, [accessKeyId, secretAccessKey, region, bucket, endpoint, provider, rootFolder, publicAccess, customCdnUrl]);
 
   const loadConnectionIntoForm = useCallback(async (connectionId: string) => {
     const session = formSessionRef.current;
@@ -329,6 +341,8 @@ export function S3ConfigModal({
           secretAccessKey,
           ...(provider === 'digitalocean' && { endpoint }),
           rootFolder,
+          publicAccess,
+          customCdnUrl: customCdnUrl.trim() || undefined,
         },
       });
 
@@ -709,6 +723,35 @@ export function S3ConfigModal({
               <p className="text-xs text-muted-foreground">
                 Define a starting path. The file explorer will start here and restrict access above it.
               </p>
+            </div>
+
+            <div className="md:col-span-2 space-y-4 pt-2 border-t border-border/50">
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="public-access"
+                  checked={publicAccess}
+                  onCheckedChange={(checked) => setPublicAccess(checked === true)}
+                />
+                <Label htmlFor="public-access" className="cursor-pointer text-sm font-medium">
+                  Make uploaded files public (<code className="text-xs bg-muted px-1 rounded">public-read</code> ACL)
+                </Label>
+              </div>
+              <p className="text-xs text-muted-foreground ml-6">
+                Allows uploaded files to be accessed via direct non-expiring links without presigned query parameters.
+              </p>
+
+              <div className="space-y-2">
+                <Label htmlFor="custom-cdn-url">Custom CDN / Public Domain (optional)</Label>
+                <Input
+                  id="custom-cdn-url"
+                  placeholder="e.g. https://sgp1.digitaloceanspaces.com/mybucket or https://cdn.mydomain.com"
+                  value={customCdnUrl}
+                  onChange={(e) => setCustomCdnUrl(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Override the default direct URL domain for copied permanent links.
+                </p>
+              </div>
             </div>
           </div>
 

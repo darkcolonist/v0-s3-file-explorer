@@ -16,6 +16,8 @@ export interface S3Config {
   endpoint?: string; // For DigitalOcean Spaces
   forcePathStyle?: boolean;
   rootFolder?: string; // Root prefix to scope operations
+  publicAccess?: boolean; // Set ACL to public-read on upload
+  customCdnUrl?: string; // e.g. https://sgp1.digitaloceanspaces.com/equadornode or https://cdn.example.com
 }
 
 export interface S3Object {
@@ -168,6 +170,23 @@ export class S3Manager {
     }
   }
 
+  getPublicUrl(key: string): string {
+    const cleanKey = key.startsWith('/') ? key.slice(1) : key;
+    if (this.config.customCdnUrl && this.config.customCdnUrl.trim()) {
+      const base = this.config.customCdnUrl.trim().replace(/\/+$/, '');
+      return `${base}/${cleanKey}`;
+    }
+
+    if (
+      this.config.forcePathStyle ||
+      this.config.endpoint?.includes('digitaloceanspaces.com')
+    ) {
+      return `https://${this.config.region}.digitaloceanspaces.com/${this.config.bucket}/${cleanKey}`;
+    }
+
+    return `https://${this.config.bucket}.s3.${this.config.region}.amazonaws.com/${cleanKey}`;
+  }
+
   async uploadObject(
     key: string,
     body: Blob | File,
@@ -180,6 +199,7 @@ export class S3Manager {
         Key: key,
         Body: new Uint8Array(arrayBuffer),
         ContentType: contentType || 'application/octet-stream',
+        ...(this.config.publicAccess ? { ACL: 'public-read' } : {}),
       });
       await this.client.send(command);
     } catch (error) {
@@ -210,6 +230,7 @@ export class S3Manager {
         Bucket: this.config.bucket,
         Key: key,
         ContentType: contentType,
+        ...(this.config.publicAccess ? { ACL: 'public-read' } : {}),
       });
       const url = await getSignedUrl(this.client, command, {
         expiresIn,

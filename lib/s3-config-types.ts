@@ -5,6 +5,8 @@ export type S3StoredCredentials = {
   secretAccessKey: string;
   endpoint?: string;
   rootFolder?: string;
+  publicAccess?: boolean;
+  customCdnUrl?: string;
 };
 
 export type S3ConfigSummary = {
