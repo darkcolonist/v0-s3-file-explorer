@@ -82,5 +82,7 @@
     / 2026-07-26 - Integrated permanent non-expiring public URL generation and optional custom CDN domain base URL setting.
     / 2026-07-26 - Added "Copy Permanent Link" option across action menus, tooltips, and file item context menus.
 
-
-
+/ 2026-07-27 - Automatic File Renaming on Collision & Mobile Upload Enhancements:
+    / 2026-07-27 - Implemented automatic timestamp-based file renaming on upload collision to prevent accidental overwrites.
+    / 2026-07-27 - Added native mobile Photo Gallery upload button using `accept="image/*"` file input.
+    / 2026-07-27 - Integrated direct mobile clipboard paste button and dropdown menu action for seamless clipboard uploads.

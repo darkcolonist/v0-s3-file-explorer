@@ -43,6 +43,8 @@ import {
   Minus,
   ArrowUp,
   Link,
+  ClipboardPaste,
+  Image as ImageIcon,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
@@ -556,31 +558,95 @@ export function FileExplorer({
 
     const path = currentPathRef.current;
     const list = Array.from(files);
+    const currentBatchKeys = new Set<string>();
 
     for (const file of list) {
-      const fileKey = path + file.name;
+      let fileKey = path + file.name;
 
-      const fileExists = objectsRef.current.some(
-        (obj) => obj.key === fileKey && !obj.isDirectory
-      );
+      const fileExists = (keyToCheck: string) =>
+        objectsRef.current.some((obj) => obj.key === keyToCheck && !obj.isDirectory) ||
+        currentBatchKeys.has(keyToCheck);
 
-      if (fileExists) {
-        setOverwriteTarget({ file, key: fileKey });
-        return;
+      if (fileExists(fileKey)) {
+        const lastDotIndex = file.name.lastIndexOf('.');
+        let baseName = file.name;
+        let ext = '';
+        if (lastDotIndex > 0) {
+          baseName = file.name.substring(0, lastDotIndex);
+          ext = file.name.substring(lastDotIndex);
+        }
+
+        const now = new Date();
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        const timestamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+
+        let newName = `${baseName}_${timestamp}${ext}`;
+        fileKey = path + newName;
+
+        let counter = 1;
+        while (fileExists(fileKey)) {
+          newName = `${baseName}_${timestamp}_${counter}${ext}`;
+          fileKey = path + newName;
+          counter++;
+        }
       }
 
+      currentBatchKeys.add(fileKey);
       await uploadFile(file, fileKey);
     }
   };
 
   handleUploadRef.current = handleUpload;
 
+  const handleClipboardPasteMobile = async () => {
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.read) {
+        toast.error('Clipboard reading not supported by your browser. Try copying content and using Ctrl+V.');
+        return;
+      }
+
+      const items = await navigator.clipboard.read();
+      const files: File[] = [];
+
+      for (const item of items) {
+        for (const type of item.types) {
+          if (type.startsWith('image/')) {
+            const blob = await item.getType(type);
+            const ext = type.split('/')[1] || 'png';
+            const file = new File([blob], `image.${ext}`, { type });
+            files.push(file);
+          }
+        }
+      }
+
+      if (files.length === 0 && navigator.clipboard.readText) {
+        const text = await navigator.clipboard.readText();
+        if (text && text.trim().length > 0) {
+          const file = new File([text], 'clipboard_text.txt', { type: 'text/plain' });
+          files.push(file);
+        }
+      }
+
+      if (files.length === 0) {
+        toast.error('No image or text found in clipboard');
+        return;
+      }
+
+      await handleUpload(files);
+    } catch (err: any) {
+      console.error('Clipboard read error:', err);
+      toast.error('Could not access clipboard. Please grant clipboard permission when prompted.');
+    }
+  };
+
   const uploadFile = async (file: File, key: string) => {
     setUploadingFiles((prev) => new Set(prev).add(key));
-    
+
+    const fileName = key.split('/').pop() || file.name;
+
     const newUpload: UploadStatus = {
       key,
-      fileName: file.name,
+      fileName,
       progress: 0,
       status: 'uploading',
     };
@@ -622,14 +688,14 @@ export function FileExplorer({
         xhr.send(file);
       });
 
-      toast.success(`Uploaded ${file.name}`);
+      toast.success(`Uploaded ${fileName}`);
       addUploadedObject(file, key);
     } catch (err: any) {
       console.error('Upload failed:', err);
       setUploads((prev) =>
         prev.map((up) => (up.key === key ? { ...up, status: 'failed', error: err.message } : up))
       );
-      toast.error(`Failed to upload ${file.name}`);
+      toast.error(`Failed to upload ${fileName}`);
     } finally {
       setUploadingFiles((prev) => {
         const newSet = new Set(prev);
@@ -1480,24 +1546,57 @@ export function FileExplorer({
 
         {/* Mobile Controls (hidden on desktop) */}
         <div className="flex sm:hidden items-center border rounded-lg overflow-hidden bg-card shadow-sm w-full">
-          {/* Upload Files - Left side */}
+          {/* Upload Photos / Gallery - opens native photo gallery on mobile */}
+          <Input
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={(e) => handleUpload(e.target.files)}
+            className="hidden"
+            id="file-input-mobile-photos"
+          />
+          <Button
+            asChild
+            variant="default"
+            className="rounded-none border-r border-border bg-blue-600 hover:bg-blue-700 text-white font-medium px-2.5 h-9 shadow-none cursor-pointer flex-1 justify-center text-xs"
+            size="sm"
+          >
+            <label htmlFor="file-input-mobile-photos" className="cursor-pointer flex items-center justify-center">
+              <ImageIcon className="w-3.5 h-3.5 mr-1" />
+              Photos
+            </label>
+          </Button>
+
+          {/* Upload Files - opens file explorer */}
           <Input
             type="file"
             multiple
             onChange={(e) => handleUpload(e.target.files)}
             className="hidden"
-            id="file-input-mobile"
+            id="file-input-mobile-files"
           />
           <Button
             asChild
-            variant="default"
-            className="rounded-none border-r border-border bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 h-9 shadow-none cursor-pointer flex-1 justify-center"
+            variant="secondary"
+            className="rounded-none border-r border-border font-medium px-2.5 h-9 shadow-none cursor-pointer flex-1 justify-center text-xs"
             size="sm"
           >
-            <label htmlFor="file-input-mobile" className="cursor-pointer flex items-center justify-center">
-              <Upload className="w-4 h-4 mr-2" />
-              Upload Files
+            <label htmlFor="file-input-mobile-files" className="cursor-pointer flex items-center justify-center">
+              <Upload className="w-3.5 h-3.5 mr-1 text-blue-500" />
+              Files
             </label>
+          </Button>
+
+          {/* Paste Clipboard button */}
+          <Button
+            onClick={handleClipboardPasteMobile}
+            variant="ghost"
+            size="sm"
+            className="rounded-none border-r border-border font-medium px-2.5 h-9 shadow-none cursor-pointer flex-1 justify-center text-xs"
+            title="Paste from Clipboard"
+          >
+            <ClipboardPaste className="w-3.5 h-3.5 mr-1 text-slate-600 dark:text-slate-300" />
+            Paste
           </Button>
 
           {/* Refresh - Standard button */}
@@ -1596,6 +1695,17 @@ export function FileExplorer({
                   ))}
                 </div>
               </div>
+
+              <DropdownMenuItem
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  void handleClipboardPasteMobile();
+                }}
+                className="cursor-pointer"
+              >
+                <ClipboardPaste className="w-4 h-4 mr-2 text-slate-500" />
+                Paste from clipboard
+              </DropdownMenuItem>
 
               <DropdownMenuItem
                 onClick={() => setShowNewFolderInput(!showNewFolderInput)}
